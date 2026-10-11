@@ -52,6 +52,10 @@
   .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 11px; color: var(--mute); letter-spacing: .06em; margin: 0; }
   .keys dt { color: var(--ink); }
   .keys dd { margin: 0; }
+  button.ghost { font: 300 11px/1.2 var(--mono); letter-spacing: .14em; color: var(--ink); background: transparent; border: 1px solid rgba(233,255,246,.3); border-radius: 999px; padding: 12px 18px; cursor: pointer; }
+  button.ghost:focus-visible { outline: 2px solid var(--spore); outline-offset: 4px; }
+  button.ghost.on { border-color: var(--lichen); color: var(--lichen); }
+  #status { margin: 0; min-height: 1.2em; font-size: 11px; letter-spacing: .06em; color: #ffb03a; max-width: 30rem; }
   #hint { position: fixed; left: 16px; bottom: max(14px, env(safe-area-inset-bottom)); z-index: 5; font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: #4d6f63; pointer-events: none; }
   @media (prefers-reduced-motion: reduce) { #portal { transition: none; } }
 </style>
@@ -77,7 +81,9 @@
     <p class="line">Un hongo y un alga se abrazan<br />y de ese abrazo nace la tierra.</p>
     <div class="row">
       <button id="enter" disabled>Cargando</button>
+      <button id="mic" class="ghost" type="button" hidden>activar respiración · micrófono</button>
     </div>
+    <p id="status" role="status"></p>
     <dl class="keys" id="keys">
       <dt>gatillo</dt><dd>empuja el tiempo</dd>
       <dt>respira</dt><dd>en el micrófono, o mantén el grip</dd>
@@ -426,7 +432,7 @@ class Card {
   hide() { this.target = 0; this.until = 0; this.key = ''; }
   update(dt, head, fwd) {
     if (clock.t > this.until) this.target = 0;
-    this.alpha += (this.target - this.alpha) * Math.min(1, dt * 1.4);
+    this.alpha += (this.target - this.alpha) * Math.min(1, dt * 2.2);
     this.mat.opacity = this.alpha; this.mesh.visible = this.alpha > 0.01;
     const goal = head.clone().addScaledVector(fwd, this.dist); goal.y = head.y + this.dy;
     if (!this.placed) { this.mesh.position.copy(goal); this.placed = true; } else this.mesh.position.lerp(goal, Math.min(1, dt * 0.9));
@@ -514,15 +520,16 @@ const music = new Music();
 /* ───────────────────────── respiración ───────────────────────── */
 const breath = {
   level: 0, env: 0, floor: 0.004, held: false, holdT: 0, activeT: 0, analyser: null, buf: null, onExhale: null, onInhale: null, micOK: false,
-  async initMic() {
+  async initMic(ask = false) {
+    if (!ask && !this.allowed) return;
     if (this.analyser || this.pending || !navigator.mediaDevices?.getUserMedia || !music.ctx) return;
     this.pending = true;
     try {
       const st = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } });
       const src = music.ctx.createMediaStreamSource(st); const hp = music.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 120;
       this.analyser = music.ctx.createAnalyser(); this.analyser.fftSize = 1024; src.connect(hp); hp.connect(this.analyser);
-      this.buf = new Float32Array(this.analyser.fftSize); this.micOK = true;
-    } catch (e) { this.micOK = false; }
+      this.buf = new Float32Array(this.analyser.fftSize); this.micOK = true; this.allowed = true;
+    } catch (e) { this.micOK = false; this.pending = false; }
   },
   grip(on) {
     if (on && !this.held) { this.held = true; this.holdT = 0; this.onInhale?.(); }
@@ -858,23 +865,23 @@ function go(i) {
 MOM.push({ // I
   enter() { music.preset({ drone: 0.5, shimmer: 0.12, bell: 0.4 }); M1.g.visible = true; },
   update(t) {
-    setOp(M1.forest, smooth(0, 10, t), 0.3, 0.4); setOp(M1.leaves, smooth(3, 14, t), 0.35, 0.55);
-    setU(M1.lich, 'uReveal', 0.02 + smooth(6, 40, t) * 1.05); setOp(M1.lich, 1);
-    once('a', () => poem.show('I', ['en la corteza,', 'una luz que no es del sol'], 9, '#43e8ff'));
-    if (t > 22) once('b', () => poem.show(null, ['liquen'], 7, '#d4ff3a'));
-    if (t > 34) once('c', () => music.set('pluck', 0.18));
-    return t > 54;
+    setOp(M1.forest, smooth(0, 4, t), 0.3, 0.4); setOp(M1.leaves, smooth(1, 6, t), 0.35, 0.55);
+    setU(M1.lich, 'uReveal', 0.02 + smooth(3, 24, t) * 1.05); setOp(M1.lich, 1);
+    once('a', () => poem.show('I', ['en la corteza,', 'una luz que no es del sol'], 8, '#43e8ff'));
+    if (t > 14) once('b', () => poem.show(null, ['liquen'], 6, '#d4ff3a'));
+    if (t > 20) once('c', () => music.set('pluck', 0.18));
+    return t > 34;
   },
 });
 MOM.push({ // II
   enter() { music.preset({ drone: 0.35, blip: 0.35, bell: 0.15, shimmer: 0.1 }); M2.g.visible = true; },
   update(t, dt) {
-    const fo = 1 - smooth(0, 7, t); setOp(M1.forest, fo, 0.3, 0.4); setOp(M1.leaves, fo, 0.35, 0.55); setOp(M1.lich, 1 - smooth(2, 9, t));
+    const fo = 1 - smooth(0, 3, t); setOp(M1.forest, fo, 0.3, 0.4); setOp(M1.leaves, fo, 0.35, 0.55); setOp(M1.lich, 1 - smooth(1, 4, t));
     if (fo <= 0) M1.g.visible = false;
-    const m = M2, k1 = smooth(18, 28, t), k2 = smooth(28, 42, t), k3 = smooth(44, 54, t), pa = m.dp.a.position, ca = m.dp.a.aColor;
-    m.dp.points.material.uniforms.uOpacity.value = smooth(3, 9, t);
+    const m = M2, k1 = smooth(10, 17, t), k2 = smooth(17, 27, t), k3 = smooth(28, 35, t), pa = m.dp.a.position, ca = m.dp.a.aColor;
+    m.dp.points.material.uniforms.uOpacity.value = smooth(1, 4, t);
     const br = 1 + 0.02 * Math.sin(t * 1.4), e1 = ease(k1), e2 = ease(k2), cE = PAL.elem;
-    if (t < 62 || dir.zoomPending) {
+    if (t < 44) {
       for (let i = 0; i < m.N; i++) {
         const j = i * 3; let x, y, z;
         if (k2 <= 0) {
@@ -891,8 +898,8 @@ MOM.push({ // II
       }
       m.dp.geo.attributes.position.needsUpdate = true; m.dp.geo.attributes.aColor.needsUpdate = true;
     }
-    setU(m.hy, 'uReveal', smooth(30, 50, t) * 1.02); setU(m.cl, 'uReveal', smooth(34, 44, t) * 1.02); setU(m.mem, 'uReveal', smooth(44, 60, t) * 1.02);
-    const mo = smooth(48, 54, t); m.mol.lines.material.uniforms.uOpacity.value = mo;
+    setU(m.hy, 'uReveal', smooth(19, 32, t) * 1.02); setU(m.cl, 'uReveal', smooth(21, 28, t) * 1.02); setU(m.mem, 'uReveal', smooth(28, 39, t) * 1.02);
+    const mo = smooth(32, 36, t); m.mol.lines.material.uniforms.uOpacity.value = mo;
     if (mo > 0) {
       const p = m.mol.a.position; const v = new V3();
       m.mols.forEach((q, i) => {
@@ -901,33 +908,33 @@ MOM.push({ // II
       });
       m.mol.geo.attributes.position.needsUpdate = true;
     }
-    once('a', () => poem.show('II', ['deshacer la forma', 'hasta hallar a quienes la soñaron'], 10, '#c49bff'));
-    if (t > 30) once('p', () => music.set('pad', 0.22));
-    if (t > 46) once('b', () => poem.show(null, ['un hongo', 'abraza a un alga'], 9, '#ff3da8'));
-    return t > 66;
+    once('a', () => poem.show('II', ['deshacer la forma', 'hasta hallar a quienes la soñaron'], 8, '#c49bff'));
+    if (t > 19) once('p', () => music.set('pad', 0.22));
+    if (t > 30) once('b', () => poem.show(null, ['un hongo', 'abraza a un alga'], 8, '#ff3da8'));
+    return t > 44;
   },
 });
 MOM.push({ // III
   enter() { music.preset({ drone: 0.4, bass: 0.3, blip: 0.45, pad: 0.25, shimmer: 0.18 }); M3.g.visible = true; dir.flow = 1; },
   update(t, dt) {
-    const z = ease(smooth(0, 7, t)), s = 1 + z * 13;
+    const z = ease(smooth(0, 3.5, t)), s = 1 + z * 13;
     const A = M2.pivot.clone().lerp(head, z); M2.g.scale.setScalar(s); M2.g.position.copy(A).addScaledVector(M2.pivot, -s);
-    const o2 = 1 - smooth(3, 7, t); M2.dp.points.material.uniforms.uOpacity.value = o2; for (const b of [M2.hy, M2.cl, M2.mem]) setOp(b, o2); M2.mol.lines.material.uniforms.uOpacity.value = o2;
+    const o2 = 1 - smooth(1.5, 3.5, t); M2.dp.points.material.uniforms.uOpacity.value = o2; for (const b of [M2.hy, M2.cl, M2.mem]) setOp(b, o2); M2.mol.lines.material.uniforms.uOpacity.value = o2;
     if (o2 <= 0) M2.g.visible = false;
-    const out = ease(smooth(54, 61, t)), sIn = 0.55 + 0.45 * ease(smooth(3, 9, t)), sc = sIn * (1 - out * 0.97);
+    const out = ease(smooth(37, 41, t)), sIn = 0.55 + 0.45 * ease(smooth(1.5, 4.5, t)), sc = sIn * (1 - out * 0.97);
     const piv = out > 0 ? new V3(0, 1.0, -2.6) : head; M3.g.scale.setScalar(sc); M3.g.position.copy(piv).multiplyScalar(1 - sc);
-    const o3 = smooth(3, 9, t) * (1 - smooth(56, 61, t));
+    const o3 = smooth(1.5, 4.5, t) * (1 - smooth(38, 41, t));
     setOp(M3.base, o3, 0.75, 0.9); M3.stream.points.material.uniforms.uOpacity.value = o3; M3.ex.points.material.uniforms.uOpacity.value = o3;
     dir.flow += ((input.trigger ? 3 : 1) - dir.flow) * Math.min(1, dt * 2);
     const sp = M3.stream.a.position; M3.sdat.forEach((d, i) => { d.u = (d.u + d.sp * dt * dir.flow + 1) % 1; const p = d.cv.getPointAt(d.u); sp[i * 3] = p.x + d.off.x; sp[i * 3 + 1] = p.y + d.off.y; sp[i * 3 + 2] = p.z + d.off.z; M3.stream.a.aSize[i] = 0.03; });
     M3.stream.geo.attributes.position.needsUpdate = true; M3.stream.geo.attributes.aSize.needsUpdate = true;
-    const xp = M3.ex.a.position; const ramp = smooth(8, 20, t);
+    const xp = M3.ex.a.position; const ramp = smooth(4, 12, t);
     M3.xdat.forEach((d, i) => { d.u = (d.u + d.sp * dt * dir.flow) % 1; const u = d.u, a = (1 - u) * (1 - u), b = 2 * u * (1 - u), c = u * u; xp[i * 3] = d.from.x * a + d.m.x * b + d.to.x * c; xp[i * 3 + 1] = d.from.y * a + d.m.y * b + d.to.y * c; xp[i * 3 + 2] = d.from.z * a + d.m.z * b + d.to.z * c; M3.ex.a.aSize[i] = 0.028 * ramp * Math.sin(u * Math.PI); });
     M3.ex.geo.attributes.position.needsUpdate = true; M3.ex.geo.attributes.aSize.needsUpdate = true;
     music.set('blip', input.trigger ? 0.7 : 0.45, 0.4);
-    if (t > 9) once('a', () => poem.show('III', ['adentro,', 'dos reinos respiran un mismo aire'], 10, '#46ff6e'));
-    if (t > 30) once('b', () => poem.show(null, ['azúcar por agua', 'abrigo por luz'], 9, '#ffd54a'));
-    return t > 61;
+    if (t > 4) once('a', () => poem.show('III', ['adentro,', 'dos reinos respiran un mismo aire'], 8, '#46ff6e'));
+    if (t > 20) once('b', () => poem.show(null, ['azúcar por agua', 'abrigo por luz'], 8, '#ffd54a'));
+    return t > 41;
   },
   exit() { M3.g.visible = false; },
 });
@@ -935,9 +942,9 @@ MOM.push({ // IV
   enter() { music.preset({ drone: 0.45, shimmer: 0.08, tick: 0.5, bell: 0.12 }); M4.g.visible = true; ground.group.visible = true; dir.P4 = 0; updateRock(M4, 0); },
   update(t, dt) {
     const m = M4, fin = dir.P4 >= 1;
-    const op = smooth(0, 5, t); m.rock.lines.material.uniforms.uOpacity.value = 0.75 * op; m.lp.points.material.uniforms.uOpacity.value = op; m.cr.lines.material.uniforms.uOpacity.value = op; setOp(m.soil, op, 1, 0.9); setOp(ground, op * 0.5);
+    const op = smooth(0, 2.5, t); m.rock.lines.material.uniforms.uOpacity.value = 0.75 * op; m.lp.points.material.uniforms.uOpacity.value = op; m.cr.lines.material.uniforms.uOpacity.value = op; setOp(m.soil, op, 1, 0.9); setOp(ground, op * 0.5);
     const rate = input.trigger ? 1 / 24 : 1 / 700;
-    const prev = dir.P4; if (t > 4 && !fin) dir.P4 = Math.min(1, dir.P4 + rate * dt);
+    const prev = dir.P4; if (t > 2 && !fin) dir.P4 = Math.min(1, dir.P4 + rate * dt);
     const P = dir.P4, dP = P - prev;
     if (Math.abs(P - m.lastP) > 1e-5) { updateRock(m, P); m.lastP = P; }
     m.lp.points.material.uniforms.uReveal.value = 0.12 + P * 1.05; m.cr.lines.material.uniforms.uReveal.value = P * 1.1 - 0.05; setU(m.soil, 'uReveal', P * 1.08);
@@ -964,10 +971,10 @@ MOM.push({ // IV
     m.trail.geo.attributes.position.needsUpdate = true; m.trail.geo.attributes.aColor.needsUpdate = true; m.trail.lines.material.uniforms.uOpacity.value = op * 0.8;
     music.tickRate = input.trigger && !fin ? 3 : 0.15; music.set('bass', input.trigger && !fin ? 0.4 : 0, 0.6);
     dir.years = Math.round(P * 1000) * 10;
-    if (t > 4 && !fin) label.hold(`${dir.years.toLocaleString('es-CL')} años`, '#ffb03a');
-    once('a', () => poem.show('IV', ['la roca madre'], 6, '#7f72ff'));
-    if (t > 7) once('b', () => poem.show(null, ['aprieta el gatillo', 'y deja correr los siglos'], 8, '#ffd27a'));
-    if (fin) { once('fin', () => { dir.finT = t; label.hold('10.000 años', '#ffb03a'); poem.show(null, ['de la piedra,', 'la primera tierra'], 8, '#ff9a3c'); music.tickRate = 0; }); if (t - dir.finT > 8) { label.hide(); return true; } }
+    if (t > 2 && !fin) label.hold(`${dir.years.toLocaleString('es-CL')} años`, '#ffb03a');
+    once('a', () => poem.show('IV', ['la roca madre'], 4, '#7f72ff'));
+    if (t > 4) once('b', () => poem.show(null, ['aprieta el gatillo', 'y deja correr los siglos'], 8, '#ffd27a'));
+    if (fin) { once('fin', () => { dir.finT = t; label.hold('10.000 años', '#ffb03a'); poem.show(null, ['de la piedra,', 'la primera tierra'], 6, '#ff9a3c'); music.tickRate = 0; }); if (t - dir.finT > 4.5) { label.hide(); return true; } }
     return false;
   },
   exit() { M4.trail.lines.visible = false; M4.sunP.points.visible = false; M4.fr.points.visible = false; },
@@ -983,7 +990,7 @@ MOM.push({ // V
   },
   update(t, dt) {
     const L = dir.life; dir.life = Math.max(0.3, dir.life - dt * 0.012);
-    if (t > 3) dir.P5 = Math.min(4, dir.P5 + dt * (input.trigger ? 0.11 * (0.45 + 0.55 * L) : 0.002 + 0.004 * L));
+    if (t > 1.5) dir.P5 = Math.min(4, dir.P5 + dt * (input.trigger ? 0.11 * (0.45 + 0.55 * L) : 0.002 + 0.004 * L));
     const p = dir.P5, lit = 0.3 + 0.7 * L;
     M5.stages.forEach((s, i) => { setU(s, 'uReveal', clamp(p - i) * 1.05); setOp(s, lit * smooth(0, 3, t) * (i === 1 && p > 3.4 ? 0.6 : 1), SOP[i], 0.9); });
     setU(M5.lich4, 'uReveal', clamp(p - 3) * 1.05); setOp(M5.lich4, lit); setU(M5.leaf4, 'uReveal', clamp(p - 3) * 1.05); setOp(M5.leaf4, lit, 1, 0.6);
@@ -993,17 +1000,17 @@ MOM.push({ // V
     const rp = M5.ring.a.position, inh = dir.inhaling ? clamp(breath.holdT / 2.5) : breath.level, since = clock.t - (dir.exhaleT ?? -99);
     const rr = 0.9 - 0.55 * inh + Math.max(0, 3 * (1 - since / 1.5)) * (since < 1.5 ? since : 0);
     for (let i = 0; i < 240; i++) { const a = i / 240 * TAU + clock.t * 0.15, wob = 0.05 * Math.sin(i * 1.7 + clock.t * 2); rp[i * 3] = head.x + Math.cos(a) * (rr + wob); rp[i * 3 + 1] = 1.05 + 0.08 * Math.sin(i * 0.5 + clock.t) + 0.2 * inh; rp[i * 3 + 2] = head.z + Math.sin(a) * (rr + wob); }
-    M5.ring.geo.attributes.position.needsUpdate = true; M5.ring.points.material.uniforms.uOpacity.value = smooth(4, 8, t) * (0.35 + 0.65 * Math.max(inh, since < 1.5 ? 1 - since / 1.5 : 0));
+    M5.ring.geo.attributes.position.needsUpdate = true; M5.ring.points.material.uniforms.uOpacity.value = smooth(2, 5, t) * (0.35 + 0.65 * Math.max(inh, since < 1.5 ? 1 - since / 1.5 : 0));
     // música por capas
     const k = 0.5 + 0.5 * L;
     music.set('pluck', p > 0.3 ? 0.32 * k : 0); music.set('pad', p > 1.2 ? 0.3 * k : 0); music.set('bass', p > 2.2 ? 0.3 * k : 0);
     music.set('bell', p > 2.2 ? 0.28 : 0.06); music.set('melody', p > 3.2 ? 0.32 * k : 0); music.set('shimmer', p > 3.5 ? 0.22 : 0.05);
     const si = Math.min(4, Math.floor(p + 0.02)); const yrs = Math.round(YEARS[Math.min(3, Math.floor(p))] + (YEARS[Math.min(4, Math.floor(p) + 1)] - YEARS[Math.min(3, Math.floor(p))]) * (p - Math.floor(p)));
-    if (t > 12) label.hold(`${STAGES[si]} · ${yrs} años`, '#9dff5a');
-    if (si !== dir.stageShown && t > 12) { dir.stageShown = si; if (si > 0) music.bellNote(pick([74, 77, 81]), undefined, 0.12); }
-    once('a', () => poem.show('V', ['respira'], 6, '#9dff5a'));
-    if (t > 6) once('b', () => poem.show(null, ['tu aliento siembra,', 'el gatillo trae los años'], 9, '#43e8ff'));
-    if (p >= 4) { once('fin', () => { dir.finT = t; }); if (t - dir.finT > 7) { label.hide(); return true; } }
+    if (t > 6) label.hold(`${STAGES[si]} · ${yrs} años`, '#9dff5a');
+    if (si !== dir.stageShown && t > 6) { dir.stageShown = si; if (si > 0) music.bellNote(pick([74, 77, 81]), undefined, 0.12); }
+    once('a', () => poem.show('V', ['respira'], 4, '#9dff5a'));
+    if (t > 4) once('b', () => poem.show(null, ['tu aliento siembra,', 'el gatillo trae los años'], 9, '#43e8ff'));
+    if (p >= 4) { once('fin', () => { dir.finT = t; }); if (t - dir.finT > 4) { label.hide(); return true; } }
     return false;
   },
   exit() { breath.onInhale = breath.onExhale = null; M5.ring.points.visible = false; },
@@ -1011,13 +1018,13 @@ MOM.push({ // V
 MOM.push({ // VI
   enter() { music.preset({ drone: 0.4, pad: 0.3, pluck: 0.18, bell: 0.2, melody: 0.22, shimmer: 0.2, bass: 0.18 }); M6.g.visible = true; dir.lastPulse = 0; },
   update(t, dt) {
-    M6.net.lines.material.uniforms.uReveal.value = smooth(1, 26, t) * 1.02; M6.net.points.material.uniforms.uReveal.value = smooth(1, 26, t) * 1.02;
-    const pu = smooth(14, 22, t); setU(M6.net, 'uPulse', pu);
+    M6.net.lines.material.uniforms.uReveal.value = smooth(0.5, 16, t) * 1.02; M6.net.points.material.uniforms.uReveal.value = smooth(0.5, 16, t) * 1.02;
+    const pu = smooth(8, 14, t); setU(M6.net, 'uPulse', pu);
     U.uPulseT.value += dt * 0.09 * pu;
-    const dim = 1 - 0.35 * smooth(4, 16, t); M5.stages.forEach((s, i) => setOp(s, dim * (i === 1 ? 0.6 : 1), SOP[i], 0.9)); setOp(M5.lich4, 1); setOp(M5.leaf4, dim, 1, 0.6);
+    const dim = 1 - 0.35 * smooth(2, 10, t); M5.stages.forEach((s, i) => setOp(s, dim * (i === 1 ? 0.6 : 1), SOP[i], 0.9)); setOp(M5.lich4, 1); setOp(M5.leaf4, dim, 1, 0.6);
     const pi = Math.floor(U.uPulseT.value); if (pu > 0.5 && pi !== dir.lastPulse) { dir.lastPulse = pi; music.bellNote(62, undefined, 0.1); setTimeout(() => music.bellNote(69, undefined, 0.07), 900); setTimeout(() => music.bellNote(74, undefined, 0.06), 2100); }
     once('a', () => poem.show('VI', ['todo lo vivo', 'está tejido'], 10, '#7dfff0'));
-    if (t > 70) once('b', () => poem.show(null, ['el liquen sostiene al bosque', 'que lo sostiene'], 12, '#d4ff3a'));
+    if (t > 50) once('b', () => poem.show(null, ['el liquen sostiene al bosque', 'que lo sostiene'], 12, '#d4ff3a'));
     if (t > 110) once('c', () => music.preset({ drone: 0.35, pad: 0.2, bell: 0.2, shimmer: 0.15 }));
     return false;
   },
@@ -1037,10 +1044,12 @@ class Liquen extends xb.Script {
     setOp(M1.forest, 0.8, 0.3, 0.4); setOp(M1.leaves, 0.7, 0.35, 0.55); setU(M1.lich, 'uReveal', 0.55);
     const tips = dynPoints(2, { twinkle: 0, maxSize: 30 }); tips.a.aColor.set([0.83, 1, 0.23, 0.26, 0.9, 1]); tips.a.aSize[0] = tips.a.aSize[1] = 0.025; tips.geo.attributes.aColor.needsUpdate = true; tips.geo.attributes.aSize.needsUpdate = true;
     this.tips = tips; scene0.add(tips.points);
-    try { await document.fonts.load('italic 300 66px "Fraunces"'); await document.fonts.load('300 24px "Martian Mono"'); } catch (e) { /* tipografía de respaldo */ }
-    ready();
+    const fonts = Promise.all([document.fonts.load('italic 300 66px "Fraunces"'), document.fonts.load('300 24px "Martian Mono"')]).catch(() => {});
+    await Promise.race([fonts, new Promise((res) => setTimeout(res, 2500))]);
+    await ready();
   }
-  onXRSessionStarted() { begin(); }
+  onXRSessionStarted() { entering = false; begin(); }
+  onXRSessionEnded() { portal.classList.remove('gone'); btn.disabled = false; btn.textContent = 'Volver a entrar'; input.trigger = false; breath.grip(false); }
   onSelectStart() { input.trigger = true; music.start(); if (dir.idx >= 0 && dir.idx < 3 || dir.idx === 5) { emitWave(head.clone(), 0.8); music.bellNote(pick([69, 72, 74, 77, 81]), undefined, 0.1); } }
   onSelectEnd() { input.trigger = false; }
   onSqueezeStart() { breath.grip(true); }
@@ -1073,21 +1082,55 @@ class Liquen extends xb.Script {
 /* ───────────────────────── portada y arranque ───────────────────────── */
 const btn = document.getElementById('enter'), portal = document.getElementById('portal'), hint = document.getElementById('hint');
 let xrOK = false;
-function ready() {
+const micBtn = document.getElementById('mic'), statusEl = document.getElementById('status');
+let entering = false;
+function say(msg) { statusEl.textContent = msg; }
+async function ready() {
   xrOK = !!xb.core.webXRSessionManager?.isXRSupported?.();
+  if (!xrOK && navigator.xr?.isSessionSupported) { try { xrOK = await navigator.xr.isSessionSupported('immersive-vr'); } catch (e) { xrOK = false; } }
   btn.disabled = false; btn.textContent = xrOK ? 'Entrar' : 'Ver en pantalla';
-  if (!xrOK) document.getElementById('keys').innerHTML = '<dt>arrastra</dt><dd>mirar</dd><dt>espacio</dt><dd>gatillo · empuja el tiempo</dd><dt>B</dt><dd>mantén para inhalar, suelta para exhalar</dd><dt>N</dt><dd>siguiente umbral</dd>';
+  if (xrOK) micBtn.hidden = false;
+  else {
+    document.getElementById('keys').innerHTML = '<dt>arrastra</dt><dd>mirar</dd><dt>espacio</dt><dd>gatillo · empuja el tiempo</dd><dt>B</dt><dd>mantén para inhalar, suelta para exhalar</dd><dt>N</dt><dd>siguiente umbral</dd>';
+    if (!window.isSecureContext) say('Para entrar en realidad virtual, abre esta página desde una dirección https.');
+    else if (!navigator.xr) say('Este navegador no ofrece realidad virtual. En el visor, ábrela con el navegador de Meta Quest.');
+  }
+  try { const st = await navigator.permissions?.query({ name: 'microphone' }); if (st?.state === 'granted') { breath.allowed = true; micBtn.classList.add('on'); micBtn.textContent = 'micrófono listo'; } } catch (e) { /* sin consulta de permisos */ }
 }
 function begin() {
-  if (dir.started) return; dir.started = true; portal.classList.add('gone');
+  if (dir.started) { portal.classList.add('gone'); return; }
+  dir.started = true; portal.classList.add('gone');
   music.start(); breath.initMic();
   setOp(M1.forest, 0); setOp(M1.leaves, 0); setU(M1.lich, 'uReveal', 0);
   go(0);
 }
+function enterXR() {
+  if (entering) return;
+  const mgr = xb.core.webXRSessionManager, r = xb.core.renderer;
+  const opts = mgr?.getSessionOptions?.() ?? { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] };
+  entering = true; btn.disabled = true; btn.textContent = 'Entrando…'; say('');
+  navigator.xr.requestSession('immersive-vr', opts)
+    .then(async (session) => {
+      if (mgr?.onSessionStartedInternal) await mgr.onSessionStartedInternal(session);
+      else { await r.xr.setSession(session); begin(); }
+      setTimeout(() => { if (!dir.started) begin(); }, 400);
+    })
+    .catch((e) => {
+      entering = false; btn.disabled = false; btn.textContent = 'Entrar';
+      say('No se pudo abrir la sesión de realidad virtual (' + (e?.name || 'error') + '). Cierra otras pestañas en modo VR y vuelve a tocar Entrar.');
+      console.error(e);
+    });
+}
 btn.addEventListener('click', () => {
   music.start();
-  if (xrOK) { try { xb.core.webXRSessionManager.startSession(); } catch (e) { console.error(e); } breath.initMic(); }
+  if (xrOK && navigator.xr) enterXR();
   else { begin(); hint.textContent = 'espacio · gatillo   B · respirar   N · siguiente'; }
+});
+micBtn.addEventListener('click', async () => {
+  music.start(); micBtn.textContent = 'pidiendo permiso…';
+  await breath.initMic(true);
+  if (breath.micOK) { micBtn.classList.add('on'); micBtn.textContent = 'micrófono listo'; say(''); }
+  else { micBtn.textContent = 'activar respiración · micrófono'; say('Sin micrófono: respira manteniendo el grip.'); }
 });
 addEventListener('keydown', (e) => {
   if (e.repeat) return;
