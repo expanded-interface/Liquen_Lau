@@ -1,0 +1,1116 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Liquen Valdiviano</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,300;1,9..144,400&family=Martian+Mono:wght@300;400&display=swap" rel="stylesheet" />
+<style>
+  /* Una sola escena: vacío negro, trazos bioluminiscentes. Portada mínima sobre el bosque en reposo. */
+  :root {
+    --void: #000000;
+    --ink: #e9fff6;
+    --mute: #7fa89a;
+    --lichen: #d4ff3a;
+    --spore: #43e8ff;
+    --poem: "Fraunces", "Iowan Old Style", Georgia, serif;
+    --mono: "Martian Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; margin: 0; background: var(--void); color: var(--ink); overflow: hidden; }
+  body { font-family: var(--mono); }
+  canvas { display: block; }
+  #portal {
+    position: fixed; inset: 0; z-index: 10;
+    display: grid; place-items: end start;
+    padding: max(24px, env(safe-area-inset-top)) 24px max(28px, env(safe-area-inset-bottom));
+    background: radial-gradient(120% 90% at 20% 100%, rgba(0,0,0,.92) 30%, rgba(0,0,0,.35) 75%, rgba(0,0,0,.1));
+    transition: opacity 1.6s ease;
+  }
+  #portal.gone { opacity: 0; pointer-events: none; }
+  .wrap { display: grid; gap: 22px; max-width: 34rem; }
+  .eyebrow { font-size: 11px; letter-spacing: .32em; text-transform: uppercase; color: var(--mute); margin: 0; }
+  h1 {
+    font-family: var(--poem); font-style: italic; font-weight: 300;
+    font-size: clamp(64px, 14vw, 148px); line-height: .86; margin: 0;
+    letter-spacing: -.02em; color: var(--ink);
+    text-shadow: 0 0 28px rgba(212,255,58,.35), 0 0 2px rgba(212,255,58,.6);
+  }
+  .line { font-family: var(--poem); font-style: italic; font-weight: 300; font-size: clamp(18px, 2.4vw, 22px); line-height: 1.45; margin: 0; color: #cfe9df; text-wrap: balance; }
+  .row { display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: center; }
+  button#enter {
+    font: 400 13px/1 var(--mono); letter-spacing: .28em; text-transform: uppercase;
+    color: var(--void); background: var(--lichen); border: 0; border-radius: 999px;
+    padding: 18px 30px; cursor: pointer;
+    box-shadow: 0 0 0 1px rgba(212,255,58,.4), 0 0 40px rgba(212,255,58,.35);
+  }
+  button#enter:hover { box-shadow: 0 0 0 1px rgba(212,255,58,.8), 0 0 60px rgba(212,255,58,.55); }
+  button#enter:focus-visible { outline: 2px solid var(--spore); outline-offset: 4px; }
+  button#enter[disabled] { opacity: .5; cursor: wait; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 11px; color: var(--mute); letter-spacing: .06em; margin: 0; }
+  .keys dt { color: var(--ink); }
+  .keys dd { margin: 0; }
+  #hint { position: fixed; left: 16px; bottom: max(14px, env(safe-area-inset-bottom)); z-index: 5; font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: #4d6f63; pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) { #portal { transition: none; } }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/": "https://cdn.jsdelivr.net/npm/three@0.185.1/",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/",
+    "xrblocks": "https://cdn.jsdelivr.net/npm/xrblocks@0.21.1/build/xrblocks.js",
+    "xrblocks/addons/": "https://cdn.jsdelivr.net/npm/xrblocks@0.21.1/build/addons/",
+    "lit": "https://cdn.jsdelivr.net/npm/lit@3.3.1/+esm",
+    "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.14.0/dist/signals-core.mjs"
+  }
+}
+</script>
+</head>
+<body>
+<div id="portal">
+  <div class="wrap">
+    <p class="eyebrow">Selva valdiviana · seis umbrales</p>
+    <h1>Liquen</h1>
+    <p class="line">Un hongo y un alga se abrazan<br />y de ese abrazo nace la tierra.</p>
+    <div class="row">
+      <button id="enter" disabled>Cargando</button>
+    </div>
+    <dl class="keys" id="keys">
+      <dt>gatillo</dt><dd>empuja el tiempo</dd>
+      <dt>respira</dt><dd>en el micrófono, o mantén el grip</dd>
+    </dl>
+  </div>
+</div>
+<div id="hint"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import * as xb from 'xrblocks';
+import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+THREE.ColorManagement.enabled = false;
+
+/* ───────────────────────── utilidades ───────────────────────── */
+const V3 = THREE.Vector3;
+const TAU = Math.PI * 2;
+const Y = new V3(0, 1, 0), X = new V3(1, 0, 0);
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+let rnd = mulberry32(7);
+const R = (a = 0, b = 1) => a + (b - a) * rnd();
+const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+const PN = new ImprovedNoise();
+const noise = (x, y, z) => PN.noise(x, y, z);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0)); return t * t * (3 - 2 * t); };
+const ease = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const col = (h) => new THREE.Color(h);
+function jit(c, a = 0.12) { const o = c.clone(); o.offsetHSL((rnd() - 0.5) * a * 0.25, 0, (rnd() - 0.5) * a); return o; }
+function randDir() { const u = rnd() * 2 - 1, a = rnd() * TAU, s = Math.sqrt(1 - u * u); return new V3(s * Math.cos(a), u, s * Math.sin(a)); }
+function randIn(r) { return randDir().multiplyScalar(r * Math.cbrt(rnd())); }
+function basis(N) { const T = new V3().crossVectors(N, Math.abs(N.y) < 0.9 ? Y : X).normalize(); const B = new V3().crossVectors(N, T); return [T, B]; }
+
+const PAL = {
+  trunk: col('#1fc9a8'), ring: col('#127a6a'), leaf: col('#38ff8c'), leaf2: col('#9dff5a'), moss: col('#1a8f6a'),
+  usnea: col('#b8ffe6'), rock: col('#7f72ff'), rockHi: col('#b3a8ff'), crack: col('#ffe2a6'),
+  lich: [col('#d4ff3a'), col('#ff8a2a'), col('#a8ffe0'), col('#ff4fa0'), col('#43e8ff'), col('#c49bff')],
+  alga: col('#46ff6e'), alga2: col('#c8ff4a'), fung: col('#ffb03a'), fung2: col('#ff3da8'), elem: col('#cfefff'),
+  sugar: col('#ffd54a'), water: col('#3ad8ff'),
+  soil: [col('#ff9a3c'), col('#c96a2c'), col('#ffcf7a'), col('#ff6f3c')],
+  sun: col('#ffd27a'), chilco: col('#ff2f6a'), ulmo: col('#f2fff8'), copihue: col('#ff2448'),
+  net: col('#7dfff0'), netHot: col('#fffbe0'), ground: col('#2b4bff'),
+};
+
+/* ───────────────────────── shaders ───────────────────────── */
+const U = {
+  uTime: { value: 0 }, uScale: { value: 600 }, uFog: { value: 0.0012 },
+  uWaveO: { value: new V3() }, uWaveR: { value: 0 }, uWaveA: { value: 0 }, uPulseT: { value: 0 },
+};
+const PV = `
+attribute vec3 aColor; attribute float aSize; attribute float aReveal; attribute float aPhase; attribute float aT;
+uniform float uTime,uScale,uFog,uOpacity,uReveal,uTwinkle,uPulse,uPulseT,uWaveR,uWaveA,uMaxSize; uniform vec3 uWaveO;
+varying vec3 vColor; varying float vAlpha;
+void main(){
+  vec4 wp = modelMatrix*vec4(position,1.0);
+  vec4 mv = viewMatrix*wp;
+  float rv = clamp((uReveal-aReveal)*12.0,0.0,1.0);
+  float tw = 1.0-uTwinkle+uTwinkle*(0.5+0.5*sin(uTime*1.3+aPhase*6.2831));
+  float d = length(mv.xyz);
+  float fog = exp(-d*d*uFog);
+  float wd = (length(wp.xz-uWaveO.xz)-uWaveR)/0.9;
+  float wave = uWaveA*exp(-wd*wd);
+  float pl = uPulse*pow(fract(uPulseT-aT),18.0);
+  vAlpha = uOpacity*rv*tw*fog;
+  vColor = aColor*(1.0+2.2*wave+2.5*pl);
+  float sc = length(modelMatrix[0].xyz);
+  float s = aSize*sc*uScale*(0.45+0.55*rv)*(1.0+0.7*wave+1.2*pl)/max(-mv.z,0.05);
+  gl_PointSize = rv>0.001 ? min(s,uMaxSize) : 0.0;
+  gl_Position = projectionMatrix*mv;
+}`;
+const PF = `
+varying vec3 vColor; varying float vAlpha;
+void main(){
+  vec2 c = gl_PointCoord-0.5; float r2 = dot(c,c)*4.0; if(r2>1.0) discard;
+  float a = exp(-r2*3.2)*(1.0-r2) + 0.5*exp(-r2*22.0);
+  gl_FragColor = vec4(vColor, a*vAlpha);
+}`;
+const LV = `
+attribute vec3 aColor; attribute float aReveal; attribute float aT;
+uniform float uTime,uFog,uOpacity,uReveal,uPulse,uPulseT,uWaveR,uWaveA; uniform vec3 uWaveO;
+varying vec3 vColor; varying float vAlpha;
+void main(){
+  vec4 wp = modelMatrix*vec4(position,1.0);
+  vec4 mv = viewMatrix*wp;
+  float rv = clamp((uReveal-aReveal)*25.0,0.0,1.0);
+  float d = length(mv.xyz);
+  float fog = exp(-d*d*uFog);
+  float wd = (length(wp.xz-uWaveO.xz)-uWaveR)/0.9;
+  float wave = uWaveA*exp(-wd*wd);
+  float pl = pow(fract(uPulseT-aT),14.0);
+  vAlpha = rv*fog*(uOpacity*(1.0+2.0*wave) + uPulse*pl);
+  vColor = aColor*(1.0+wave+1.5*uPulse*pl);
+  gl_Position = projectionMatrix*mv;
+}`;
+const LF = `varying vec3 vColor; varying float vAlpha; void main(){ gl_FragColor = vec4(vColor, vAlpha); }`;
+
+function pointMat(o = {}) {
+  return new THREE.ShaderMaterial({
+    uniforms: { ...U, uOpacity: { value: o.opacity ?? 1 }, uReveal: { value: o.reveal ?? 2 }, uTwinkle: { value: o.twinkle ?? 0.25 }, uPulse: { value: 0 }, uMaxSize: { value: o.maxSize ?? 40 } },
+    vertexShader: PV, fragmentShader: PF, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+}
+function lineMat(o = {}) {
+  return new THREE.ShaderMaterial({
+    uniforms: { ...U, uOpacity: { value: o.opacity ?? 1 }, uReveal: { value: o.reveal ?? 2 }, uPulse: { value: 0 } },
+    vertexShader: LV, fragmentShader: LF, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+}
+
+/* Acumulador de trazos y esporas */
+class Geo {
+  constructor() { this.L = { p: [], c: [], r: [], t: [] }; this.P = { p: [], c: [], s: [], r: [], ph: [], t: [] }; }
+  seg(a, b, c, ra = 0, rb = ra, ta = 0, tb = ta, c2 = c) {
+    const L = this.L; L.p.push(a.x, a.y, a.z, b.x, b.y, b.z); L.c.push(c.r, c.g, c.b, c2.r, c2.g, c2.b); L.r.push(ra, rb); L.t.push(ta, tb);
+  }
+  poly(pts, c, r0 = 0, r1 = r0, t0 = 0, tScale = 0, c1 = null) {
+    let len = 0; const n = pts.length;
+    for (let i = 1; i < n; i++) {
+      const a = pts[i - 1], b = pts[i], l = a.distanceTo(b), f0 = (i - 1) / (n - 1), f1 = i / (n - 1);
+      const ca = c1 ? c.clone().lerp(c1, f0) : c, cb = c1 ? c.clone().lerp(c1, f1) : c;
+      this.seg(a, b, ca, r0 + (r1 - r0) * f0, r0 + (r1 - r0) * f1, t0 + len * tScale, t0 + (len + l) * tScale, cb); len += l;
+    }
+    return len;
+  }
+  pt(p, c, s, r = 0, ph = rnd(), t = 0) { const P = this.P; P.p.push(p.x, p.y, p.z); P.c.push(c.r, c.g, c.b); P.s.push(s); P.r.push(r); P.ph.push(ph); P.t.push(t); }
+  build(o = {}) {
+    const g = new THREE.Group(); const out = { group: g, lines: null, points: null };
+    if (this.L.p.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(this.L.p, 3));
+      geo.setAttribute('aColor', new THREE.Float32BufferAttribute(this.L.c, 3));
+      geo.setAttribute('aReveal', new THREE.Float32BufferAttribute(this.L.r, 1));
+      geo.setAttribute('aT', new THREE.Float32BufferAttribute(this.L.t, 1));
+      out.lines = new THREE.LineSegments(geo, lineMat({ opacity: o.lineOp ?? 1, reveal: o.reveal ?? 2 }));
+      out.lines.frustumCulled = false; g.add(out.lines);
+    }
+    if (this.P.p.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(this.P.p, 3));
+      geo.setAttribute('aColor', new THREE.Float32BufferAttribute(this.P.c, 3));
+      geo.setAttribute('aSize', new THREE.Float32BufferAttribute(this.P.s, 1));
+      geo.setAttribute('aReveal', new THREE.Float32BufferAttribute(this.P.r, 1));
+      geo.setAttribute('aPhase', new THREE.Float32BufferAttribute(this.P.ph, 1));
+      geo.setAttribute('aT', new THREE.Float32BufferAttribute(this.P.t, 1));
+      out.points = new THREE.Points(geo, pointMat({ opacity: o.pointOp ?? 1, reveal: o.reveal ?? 2, twinkle: o.twinkle ?? 0.25, maxSize: o.maxSize }));
+      out.points.frustumCulled = false; g.add(out.points);
+    }
+    return out;
+  }
+}
+function setU(obj, name, v) {
+  for (const m of [obj.lines, obj.points]) if (m && m.material.uniforms[name]) m.material.uniforms[name].value = v;
+}
+function setOp(obj, v, lineK = 1, pointK = 1) {
+  if (obj.lines) obj.lines.material.uniforms.uOpacity.value = v * lineK;
+  if (obj.points) obj.points.material.uniforms.uOpacity.value = v * pointK;
+  obj.group.visible = v > 0.002;
+}
+function dynPoints(n, o = {}) {
+  const geo = new THREE.BufferGeometry();
+  const a = { position: new Float32Array(n * 3), aColor: new Float32Array(n * 3), aSize: new Float32Array(n), aReveal: new Float32Array(n), aPhase: new Float32Array(n), aT: new Float32Array(n) };
+  for (const k in a) { const it = (k === 'position' || k === 'aColor') ? 3 : 1; const at = new THREE.BufferAttribute(a[k], it); if (k === 'position' || k === 'aColor' || k === 'aSize') at.setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, at); }
+  for (let i = 0; i < n; i++) a.aPhase[i] = rnd();
+  const pts = new THREE.Points(geo, pointMat(o)); pts.frustumCulled = false;
+  return { points: pts, a, geo, group: pts, lines: null };
+}
+function dynLines(nSeg, o = {}) {
+  const geo = new THREE.BufferGeometry();
+  const a = { position: new Float32Array(nSeg * 6), aColor: new Float32Array(nSeg * 6), aReveal: new Float32Array(nSeg * 2), aT: new Float32Array(nSeg * 2) };
+  for (const k in a) { const it = (k === 'position' || k === 'aColor') ? 3 : 1; const at = new THREE.BufferAttribute(a[k], it); if (k === 'position' || k === 'aColor') at.setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, at); }
+  const ln = new THREE.LineSegments(geo, lineMat(o)); ln.frustumCulled = false;
+  return { lines: ln, a, geo, group: ln, points: null };
+}
+
+/* ───────────────────────── organismos ───────────────────────── */
+function lichenPatch(g, P, N, size, c, rev = 0, spread = 0.06, n = 40, t = 0) {
+  const [T, B] = basis(N); const lobes = 3 + Math.floor(rnd() * 5), ph = rnd() * TAU;
+  const outline = [];
+  for (let i = 0; i <= 26; i++) { const a = i / 26 * TAU, rr = size * (0.72 + 0.28 * Math.cos(lobes * a + ph)); outline.push(P.clone().addScaledVector(T, Math.cos(a) * rr).addScaledVector(B, Math.sin(a) * rr).addScaledVector(N, 0.006)); }
+  g.poly(outline, c.clone().multiplyScalar(0.75), rev + spread, rev + spread, t, 0);
+  for (let i = 0; i < n; i++) {
+    const a = rnd() * TAU, f = Math.sqrt(rnd()), rr = size * f * (0.72 + 0.28 * Math.cos(lobes * a + ph));
+    const p = P.clone().addScaledVector(T, Math.cos(a) * rr).addScaledVector(B, Math.sin(a) * rr).addScaledVector(N, 0.01 * (1 - f));
+    g.pt(p, jit(c, 0.25).multiplyScalar(1.15 - 0.4 * f), (0.012 + 0.01 * rnd()) * (0.6 + size * 4), rev + f * spread, rnd(), t);
+  }
+  if (rnd() < 0.55) for (let k = 0; k < 3; k++) { const a = rnd() * TAU, rr = size * 0.5 * rnd(); g.pt(P.clone().addScaledVector(T, Math.cos(a) * rr).addScaledVector(B, Math.sin(a) * rr).addScaledVector(N, 0.015), PAL.lich[1], 0.03, rev + spread * 0.7, rnd(), t); }
+}
+
+function usnea(g, start, rev, t = 0) {
+  const k = 2 + Math.floor(rnd() * 3);
+  for (let s = 0; s < k; s++) {
+    const pts = [start.clone()]; let p = start.clone(); const len = R(0.3, 1.1), n = 7;
+    for (let i = 0; i < n; i++) { p = p.clone().add(new V3(R(-0.04, 0.04), -len / n, R(-0.04, 0.04))); pts.push(p); }
+    g.poly(pts, jit(PAL.usnea, 0.2), rev, rev + 0.04, t, 0);
+  }
+}
+
+function branch(g, start, dir, L, depth, rev, o) {
+  const n = 4; const pts = [start.clone()]; const d = dir.clone(); let p = start.clone();
+  for (let i = 0; i < n; i++) { d.add(new V3(R(-0.25, 0.25), R(-0.12, 0.1), R(-0.25, 0.25))).normalize(); if (d.y < -0.15) d.y = -0.15; p = p.clone().addScaledVector(d, L / n); pts.push(p); }
+  const r1 = rev + (o.span ?? 0) * 0.12;
+  g.poly(pts, o.branchCol ?? PAL.trunk, rev, r1, o.t ?? 0, 0);
+  if (o.anchors && depth === 0) o.anchors.push({ p: pts[n].clone(), kind: 'crown', tree: o.treeId });
+  if (depth < (o.depth ?? 2)) {
+    const kids = depth === 0 ? 3 : 2;
+    for (let k = 0; k < kids; k++) {
+      const f = R(0.45, 1), idx = Math.min(n, Math.max(1, Math.round(f * n)));
+      const nd = d.clone().add(new V3(R(-0.8, 0.8), R(-0.1, 0.5), R(-0.8, 0.8))).normalize();
+      branch(g, pts[idx], nd, L * R(0.45, 0.65), depth + 1, rev + (r1 - rev) * f, o);
+    }
+  } else {
+    const tip = pts[n], fl = o.leafGeo ?? g, nn = o.leafPts ?? 16, cr = L * 0.55 + 0.25;
+    for (let k = 0; k < nn; k++) { const q = tip.clone().add(randIn(cr)); q.y += cr * 0.25; fl.pt(q, jit(o.leafCol ?? PAL.leaf, 0.3), R(0.025, 0.05), r1 + 0.02 + rnd() * 0.06, rnd(), o.t ?? 0); }
+    if (o.flowers && rnd() < o.flowers) for (let k = 0; k < 5; k++) fl.pt(tip.clone().add(randIn(cr * 0.8)), o.flowerCol ?? PAL.ulmo, 0.035, r1 + 0.08, rnd(), o.t ?? 0);
+  }
+  if (o.usnea && rnd() < o.usnea) usnea(o.lg ?? g, pts[1 + Math.floor(rnd() * (n - 1))], r1 + 0.05, o.t ?? 0);
+}
+
+function tree(g, x, z, H, o = {}) {
+  const rv0 = o.rev ?? 0, rspan = o.span ?? 0, tc = o.trunkCol ?? PAL.trunk;
+  const lx = R(-0.6, 0.6), lz = R(-0.6, 0.6), R0 = o.radius ?? (0.07 + H * 0.017);
+  const cen = (h) => new V3(x + lx * (h / H) ** 2, h, z + lz * (h / H) ** 2);
+  const rad = (h) => R0 * (1 - 0.55 * h / H) + R0 * 0.9 * Math.exp(-h * 3);
+  const NS = o.sides ?? 6, NH = Math.max(5, Math.round(H / 0.8)), top = H * 0.92;
+  const revH = (h) => rv0 + rspan * 0.55 * (h / H);
+  const tt = o.t ?? 0;
+  for (let k = 0; k < NS; k++) {
+    const a0 = k / NS * TAU + R(-0.1, 0.1); const pts = [];
+    for (let i = 0; i <= NH; i++) { const h = i / NH * top, c = cen(h), r = rad(h); pts.push(c.add(new V3(Math.cos(a0 + h * 0.12) * r, 0, Math.sin(a0 + h * 0.12) * r))); }
+    g.poly(pts, jit(tc, 0.12), revH(0), revH(top), tt, 0);
+  }
+  for (let i = 1; i < NH; i += 2) {
+    const h = i / NH * top, c = cen(h), r = rad(h), pts = [];
+    for (let k = 0; k <= NS * 2; k++) { const a = k / (NS * 2) * TAU; pts.push(new V3(c.x + Math.cos(a) * r, h, c.z + Math.sin(a) * r)); }
+    g.poly(pts, o.ringCol ?? PAL.ring, revH(h), revH(h), tt, 0);
+  }
+  const nr = 4 + Math.floor(rnd() * 3);
+  for (let k = 0; k < nr; k++) {
+    const a = rnd() * TAU, len = R0 * R(6, 14), pts = [];
+    for (let i = 0; i <= 5; i++) { const f = i / 5; pts.push(new V3(x + Math.cos(a + f * R(-0.3, 0.3)) * (R0 + len * f), 0.02 + 0.25 * R0 * (1 - f) * 4, z + Math.sin(a + f * 0.2) * (R0 + len * f))); }
+    g.poly(pts, PAL.ring, rv0, rv0 + rspan * 0.05, tt, 0);
+  }
+  if (o.anchors) o.anchors.push({ p: new V3(x, 0.02, z), kind: 'base', tree: o.treeId, H });
+  const nb = o.branches ?? Math.round(R(4, 8));
+  for (let b = 0; b < nb; b++) {
+    const h = H * R(0.45, 0.9), a = rnd() * TAU, start = cen(h);
+    const dir = new V3(Math.cos(a), R(0.35, 0.9), Math.sin(a)).normalize();
+    branch(g, start, dir, H * R(0.22, 0.34) * (1.1 - h / H * 0.5), 0, revH(h), o);
+  }
+  if (o.vine) {
+    const pts = []; const turns = R(2, 4), top2 = H * R(0.35, 0.6), a0 = rnd() * TAU;
+    for (let i = 0; i <= 50; i++) { const f = i / 50, h = f * top2, c = cen(h), r = rad(h) + 0.03; pts.push(new V3(c.x + Math.cos(a0 + f * turns * TAU) * r, h, c.z + Math.sin(a0 + f * turns * TAU) * r)); }
+    g.poly(pts, PAL.leaf2, revH(0) + 0.05, revH(top2) + 0.08, tt, 0);
+    for (let k = 0; k < 6; k++) { const q = pts[10 + Math.floor(rnd() * 40)]; (o.leafGeo ?? g).pt(q.clone().add(new V3(0, -0.06, 0)), PAL.copihue, 0.06, revH(q.y) + 0.12, rnd(), tt); }
+  }
+  if (o.lichens && o.lg) {
+    for (let k = 0; k < o.lichens; k++) {
+      const h = R(0.15, Math.min(H * 0.6, 6)), a = rnd() * TAU, c = cen(h), r = rad(h);
+      const N = new V3(Math.cos(a), 0, Math.sin(a)); const P = c.addScaledVector(N, r);
+      const rv = o.lichRev ? o.lichRev(h) : revH(h) + 0.05;
+      lichenPatch(o.lg, P, N, R(0.05, 0.16), pick(PAL.lich), rv, 0.05, 34, tt);
+      if (o.anchors) o.anchors.push({ p: P.clone(), kind: 'lichen', tree: o.treeId, h });
+    }
+  }
+  return { cen, rad };
+}
+
+function fern(g, base, a, len, rev = 0, c = PAL.leaf2, t = 0) {
+  const pts = []; const dir = new V3(Math.cos(a), 0, Math.sin(a));
+  for (let i = 0; i <= 8; i++) { const f = i / 8; pts.push(base.clone().addScaledVector(dir, len * f * 0.8).add(new V3(0, len * (Math.sin(f * Math.PI * 0.8)) * 0.55, 0))); }
+  g.poly(pts, c, rev, rev + 0.03, t, 0);
+  const side = new V3(-dir.z, 0, dir.x);
+  for (let i = 1; i < 8; i++) {
+    const w = len * 0.18 * Math.sin(i / 8 * Math.PI);
+    for (const s of [-1, 1]) g.seg(pts[i], pts[i].clone().addScaledVector(side, s * w).add(new V3(0, -w * 0.3, 0)).addScaledVector(dir, w * 0.3), c.clone().multiplyScalar(0.7), rev + 0.03 * i / 8, rev + 0.03 * i / 8 + 0.01, t, t);
+  }
+}
+function nalca(g, base, rev = 0, t = 0) {
+  const h = R(0.9, 1.5), lean = randDir(); lean.y = 0; lean.normalize();
+  const top = base.clone().add(new V3(lean.x * 0.3, h, lean.z * 0.3));
+  g.poly([base, base.clone().lerp(top, 0.5).add(new V3(0, 0.05, 0)), top], PAL.leaf.clone().multiplyScalar(0.7), rev, rev + 0.03, t, 0);
+  const rr = R(0.7, 1.2), nV = 9, edge = [];
+  for (let i = 0; i <= nV; i++) {
+    const a = i / nV * TAU, d = new V3(Math.cos(a), 0, Math.sin(a));
+    const tip = top.clone().addScaledVector(d, rr).add(new V3(0, -0.25 * rr + 0.1 * Math.sin(a * 3), 0));
+    if (i < nV) g.poly([top, top.clone().addScaledVector(d, rr * 0.5).add(new V3(0, 0.02, 0)), tip], PAL.leaf2.clone().multiplyScalar(0.8), rev + 0.03, rev + 0.06, t, 0);
+    const lobe = top.clone().addScaledVector(new V3(Math.cos(a + 0.35), 0, Math.sin(a + 0.35)), rr * 0.85).add(new V3(0, -0.22 * rr, 0));
+    edge.push(tip, lobe);
+  }
+  g.poly(edge, PAL.leaf.clone().multiplyScalar(0.6), rev + 0.06, rev + 0.06, t, 0);
+}
+function cladonia(g, P, rev = 0, t = 0) {
+  const n = 4 + Math.floor(rnd() * 6);
+  for (let i = 0; i < n; i++) {
+    const b = P.clone().add(new V3(R(-0.05, 0.05), 0, R(-0.05, 0.05))), h = R(0.03, 0.07), top = b.clone().add(new V3(R(-0.01, 0.01), h, R(-0.01, 0.01)));
+    g.seg(b, top, PAL.lich[2], rev, rev + 0.01, t, t);
+    const ring = []; for (let k = 0; k <= 8; k++) { const a = k / 8 * TAU; ring.push(top.clone().add(new V3(Math.cos(a) * 0.012, 0.004, Math.sin(a) * 0.012))); }
+    g.poly(ring, PAL.lich[2], rev + 0.01, rev + 0.01, t, 0);
+    if (rnd() < 0.4) g.pt(top.clone().add(new V3(0, 0.008, 0)), PAL.copihue, 0.022, rev + 0.012, rnd(), t);
+  }
+}
+function icoWire(detail) {
+  let geo = new THREE.IcosahedronGeometry(1, detail); geo.deleteAttribute('normal'); geo.deleteAttribute('uv'); geo = mergeVertices(geo);
+  const pos = geo.attributes.position, idx = geo.index.array; const seen = new Set(), edges = [];
+  for (let i = 0; i < idx.length; i += 3) for (const [a, b] of [[idx[i], idx[i + 1]], [idx[i + 1], idx[i + 2]], [idx[i + 2], idx[i]]]) {
+    const k = Math.min(a, b) * 100000 + Math.max(a, b); if (!seen.has(k)) { seen.add(k); edges.push(a, b); }
+  }
+  const dirs = []; for (let i = 0; i < pos.count; i++) dirs.push(new V3(pos.getX(i), pos.getY(i), pos.getZ(i)).normalize());
+  return { dirs, edges };
+}
+function smallRock(g, lg, C, size, rev = 0, lichRev = 0, t = 0) {
+  const w = icoWire(1), S = new V3(size * R(1, 1.4), size * R(0.5, 0.8), size * R(0.9, 1.3)), seed = rnd() * 10;
+  const P = w.dirs.map((d) => { const r = 1 + 0.28 * noise(d.x * 1.7 + seed, d.y * 1.7, d.z * 1.7); return new V3(C.x + S.x * d.x * r, Math.max(0, C.y + S.y * d.y * r), C.z + S.z * d.z * r); });
+  for (let i = 0; i < w.edges.length; i += 2) g.seg(P[w.edges[i]], P[w.edges[i + 1]], jit(PAL.rock, 0.2).multiplyScalar(0.7), rev, rev, t, t);
+  const nl = 2 + Math.floor(rnd() * 3);
+  for (let k = 0; k < nl; k++) { const d = randDir(); d.y = Math.abs(d.y) + 0.3; d.normalize(); const r = 1 + 0.28 * noise(d.x * 1.7 + seed, d.y * 1.7, d.z * 1.7); const p = new V3(C.x + S.x * d.x * r, C.y + S.y * d.y * r, C.z + S.z * d.z * r); lichenPatch(lg, p, d, R(0.04, 0.1), pick(PAL.lich), lichRev, 0.04, 28, t); }
+}
+
+/* ───────────────────────── texto flotante ───────────────────────── */
+class Card {
+  constructor(worldW = 1.5, h = 360, opts = {}) {
+    this.cv = document.createElement('canvas'); this.cv.width = 1024; this.cv.height = h; this.ctx = this.cv.getContext('2d');
+    this.tex = new THREE.CanvasTexture(this.cv); this.tex.minFilter = THREE.LinearFilter; this.tex.generateMipmaps = false;
+    this.mat = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, opacity: 0, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending });
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(worldW, worldW * h / 1024), this.mat); this.mesh.renderOrder = 999; this.mesh.frustumCulled = false;
+    this.alpha = 0; this.target = 0; this.until = 0; this.dist = opts.dist ?? 2.1; this.dy = opts.dy ?? -0.05; this.placed = false; this.key = '';
+  }
+  draw(numeral, lines, glow = '#d4ff3a', mono = false) {
+    const c = this.ctx, W = this.cv.width, H = this.cv.height; c.clearRect(0, 0, W, H); c.textAlign = 'center'; c.textBaseline = 'middle';
+    let y = H / 2 - (lines.length - 1) * 38 - (numeral ? 26 : 0);
+    if (numeral) { c.font = '300 24px "Martian Mono", monospace'; if ('letterSpacing' in c) c.letterSpacing = '10px'; c.fillStyle = glow; c.shadowColor = glow; c.shadowBlur = 16; c.fillText(numeral, W / 2, y - 18); y += 52; if ('letterSpacing' in c) c.letterSpacing = '0px'; }
+    for (const ln of lines) {
+      c.font = mono ? '300 30px "Martian Mono", monospace' : 'italic 300 66px "Fraunces", Georgia, serif';
+      if (mono && 'letterSpacing' in c) c.letterSpacing = '4px';
+      c.shadowColor = glow; c.shadowBlur = 30; c.fillStyle = 'rgba(233,255,246,0.95)'; c.fillText(ln, W / 2, y);
+      c.shadowBlur = 6; c.fillText(ln, W / 2, y);
+      if ('letterSpacing' in c) c.letterSpacing = '0px';
+      y += mono ? 54 : 78;
+    }
+    this.tex.needsUpdate = true;
+  }
+  show(numeral, lines, dur = 7, glow, mono) { this.draw(numeral, lines, glow, mono); this.target = 1; this.until = clock.t + dur; this.placed = this.alpha > 0.05 ? this.placed : false; }
+  hold(text, glow) { if (this.key !== text) { this.key = text; this.draw(null, [text], glow, true); } this.target = 1; this.until = Infinity; }
+  hide() { this.target = 0; this.until = 0; this.key = ''; }
+  update(dt, head, fwd) {
+    if (clock.t > this.until) this.target = 0;
+    this.alpha += (this.target - this.alpha) * Math.min(1, dt * 1.4);
+    this.mat.opacity = this.alpha; this.mesh.visible = this.alpha > 0.01;
+    const goal = head.clone().addScaledVector(fwd, this.dist); goal.y = head.y + this.dy;
+    if (!this.placed) { this.mesh.position.copy(goal); this.placed = true; } else this.mesh.position.lerp(goal, Math.min(1, dt * 0.9));
+    this.mesh.lookAt(head);
+  }
+}
+
+/* ───────────────────────── música generativa ───────────────────────── */
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+class Music {
+  constructor() { this.ctx = null; this.lv = {}; this.g = {}; this.step = 0; this.chord = 0; this.tickRate = 0; this.breath = 0; }
+  start() {
+    if (this.ctx) { this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    const C = this.ctx = new AC(); const now = C.currentTime;
+    this.master = C.createGain(); this.master.gain.value = 0; this.master.gain.setTargetAtTime(0.75, now, 2.5);
+    const comp = C.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 3; this.master.connect(comp); comp.connect(C.destination);
+    const conv = C.createConvolver(); conv.buffer = this.impulse(4.2); this.rev = C.createGain(); this.rev.gain.value = 0.55; this.rev.connect(conv); conv.connect(this.master);
+    this.delay = C.createDelay(1.5); this.delay.delayTime.value = 0.68; const fb = C.createGain(); fb.gain.value = 0.38; this.delay.connect(fb); fb.connect(this.delay); this.delay.connect(this.rev); this.delay.connect(this.master);
+    for (const n of ['drone', 'pad', 'shimmer', 'pluck', 'bell', 'bass', 'blip', 'tick', 'melody']) { const g = C.createGain(); g.gain.value = 0; g.connect(this.master); g.connect(this.rev); this.g[n] = g; this.lv[n] = 0; }
+    // dron
+    const dl = C.createBiquadFilter(); dl.type = 'lowpass'; dl.frequency.value = 380; dl.connect(this.g.drone);
+    for (const [m, type, det] of [[38, 'sine', 0], [45, 'triangle', 4], [50, 'sine', -3]]) { const o = C.createOscillator(); o.type = type; o.frequency.value = mtof(m); o.detune.value = det; const og = C.createGain(); og.gain.value = 0.22; o.connect(og); og.connect(dl); o.start(); }
+    const lfo = C.createOscillator(); lfo.frequency.value = 0.05; const lg = C.createGain(); lg.gain.value = 160; lfo.connect(lg); lg.connect(dl.frequency); lfo.start();
+    // pad
+    this.padF = C.createBiquadFilter(); this.padF.type = 'lowpass'; this.padF.frequency.value = 700; this.padF.Q.value = 0.4; this.padF.connect(this.g.pad);
+    this.padOsc = [];
+    for (let v = 0; v < 4; v++) for (const det of [-7, 7]) { const o = C.createOscillator(); o.type = 'sawtooth'; o.detune.value = det; const og = C.createGain(); og.gain.value = 0.045; o.connect(og); og.connect(this.padF); o.start(); this.padOsc.push({ o, v }); }
+    // brillo
+    const nb = C.createBuffer(1, C.sampleRate * 2, C.sampleRate); const d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const ns = C.createBufferSource(); ns.buffer = nb; ns.loop = true; const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3200; bp.Q.value = 9;
+    const ng = C.createGain(); ng.gain.value = 0.35; ns.connect(bp); bp.connect(ng); ng.connect(this.g.shimmer); ns.start();
+    const sl = C.createOscillator(); sl.frequency.value = 0.07; const sg = C.createGain(); sg.gain.value = 1800; sl.connect(sg); sg.connect(bp.frequency); sl.start();
+    for (const m of [86, 93, 98]) { const o = C.createOscillator(); o.frequency.value = mtof(m); const og = C.createGain(); og.gain.value = 0.018; o.connect(og); og.connect(this.g.shimmer); o.start(); }
+    this.noiseBuf = nb;
+    this.chords = [[62, 65, 69, 72], [58, 62, 65, 69], [53, 57, 60, 64], [55, 60, 62, 67]];
+    this.scale = [62, 65, 67, 69, 72, 74, 77, 79, 81, 84];
+    this.setChord(0, now);
+    this.next = now + 0.2; this.beat = 60 / 66 / 2;
+    setInterval(() => this.schedule(), 40);
+  }
+  impulse(sec) {
+    const C = this.ctx, n = Math.floor(C.sampleRate * sec), b = C.createBuffer(2, n, C.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d = b.getChannelData(ch); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2.6); }
+    return b;
+  }
+  setChord(i, t) { this.chord = i; const ch = this.chords[i]; for (const { o, v } of this.padOsc) o.frequency.setTargetAtTime(mtof(ch[v] - 12), t, 0.8); }
+  set(n, v, tc = 1.5) { if (!this.ctx || !this.g[n]) return; if (Math.abs((this.lv[n] ?? 0) - v) < 0.01) return; this.lv[n] = v; this.g[n].gain.setTargetAtTime(v, this.ctx.currentTime, tc); }
+  preset(o) { for (const n in this.g) this.set(n, o[n] ?? 0, 2.2); }
+  voice(freq, t, dur, type = 'triangle', vol = 0.2, dest, attack = 0.005) {
+    const C = this.ctx, o = C.createOscillator(), g = C.createGain(); o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(dest); o.start(t); o.stop(t + dur + 0.05); return o;
+  }
+  bellNote(m, t, vol = 0.12) {
+    if (!this.ctx) return; const C = this.ctx; t = t ?? C.currentTime + 0.02;
+    const car = C.createOscillator(), mod = C.createOscillator(), mg = C.createGain(), g = C.createGain();
+    car.frequency.value = mtof(m); mod.frequency.value = mtof(m) * 3.5; mg.gain.setValueAtTime(mtof(m) * 2.2, t); mg.gain.exponentialRampToValueAtTime(1, t + 2.5);
+    mod.connect(mg); mg.connect(car.frequency); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 4);
+    car.connect(g); g.connect(this.g.bell); g.connect(this.delay); car.start(t); mod.start(t); car.stop(t + 4.1); mod.stop(t + 4.1);
+  }
+  click(t, vol, freq) {
+    const C = this.ctx, s = C.createBufferSource(); s.buffer = this.noiseBuf; const f = C.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 6;
+    const g = C.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06); s.connect(f); f.connect(g); g.connect(this.g.tick); s.start(t, Math.random()); s.stop(t + 0.08);
+  }
+  schedule() {
+    const C = this.ctx; if (!C) return;
+    while (this.next < C.currentTime + 0.25) {
+      const t = this.next, s = this.step++;
+      if (s % 32 === 0) this.setChord((this.chord + 1) % 4, t);
+      const ch = this.chords[this.chord];
+      if (this.lv.pluck > 0.01 && Math.random() < 0.55) { const m = pick(this.scale) + (Math.random() < 0.3 ? 12 : 0); const o = this.voice(mtof(m), t, 1.4, 'triangle', 0.16, this.g.pluck); if (Math.random() < 0.5) { const g2 = this.ctx.createGain(); g2.gain.value = 0.5; o.connect(g2); g2.connect(this.delay); } }
+      if (this.lv.bass > 0.01 && s % 4 === 0) this.voice(mtof(ch[0] - 24), t, 1.6, 'sine', 0.42, this.g.bass, 0.02);
+      if (this.lv.bell > 0.01 && Math.random() < 0.09) this.bellNote(pick(this.scale) + 12, t, 0.09);
+      if (this.lv.blip > 0.01 && Math.random() < 0.35) { const o = this.voice(mtof(pick(this.scale) + 12), t, 0.25, 'sine', 0.12, this.g.blip, 0.003); o.frequency.exponentialRampToValueAtTime(mtof(pick(this.scale) + (Math.random() < 0.5 ? 0 : 24)), t + 0.18); }
+      if (this.lv.melody > 0.01 && s % 3 === 0 && Math.random() < 0.7) { const m = pick(ch) + 12; this.voice(mtof(m), t, 3.2, 'sine', 0.13, this.g.melody, 0.4); this.voice(mtof(m) * 2.003, t, 2.2, 'sine', 0.03, this.g.melody, 0.5); }
+      if (this.tickRate > 0.01) { const n = Math.max(1, Math.round(this.tickRate)); for (let k = 0; k < n; k++) if (Math.random() < Math.min(1, this.tickRate)) this.click(t + k * this.beat / n, 0.25, 2200 + Math.random() * 2600); }
+      this.next += this.beat;
+    }
+    if (this.padF) this.padF.frequency.setTargetAtTime(600 + this.breath * 2200, C.currentTime, 0.3);
+  }
+}
+const music = new Music();
+
+/* ───────────────────────── respiración ───────────────────────── */
+const breath = {
+  level: 0, env: 0, floor: 0.004, held: false, holdT: 0, activeT: 0, analyser: null, buf: null, onExhale: null, onInhale: null, micOK: false,
+  async initMic() {
+    if (this.analyser || this.pending || !navigator.mediaDevices?.getUserMedia || !music.ctx) return;
+    this.pending = true;
+    try {
+      const st = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } });
+      const src = music.ctx.createMediaStreamSource(st); const hp = music.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 120;
+      this.analyser = music.ctx.createAnalyser(); this.analyser.fftSize = 1024; src.connect(hp); hp.connect(this.analyser);
+      this.buf = new Float32Array(this.analyser.fftSize); this.micOK = true;
+    } catch (e) { this.micOK = false; }
+  },
+  grip(on) {
+    if (on && !this.held) { this.held = true; this.holdT = 0; this.onInhale?.(); }
+    else if (!on && this.held) { this.held = false; this.onExhale?.(clamp(0.35 + this.holdT / 3.5, 0.35, 1.2)); }
+  },
+  update(dt) {
+    let micLvl = 0;
+    if (this.analyser) {
+      this.analyser.getFloatTimeDomainData(this.buf); let s = 0; for (let i = 0; i < this.buf.length; i++) s += this.buf[i] * this.buf[i];
+      const rms = Math.sqrt(s / this.buf.length);
+      this.env += (rms - this.env) * Math.min(1, dt * (rms > this.env ? 9 : 3));
+      if (this.env < this.floor) this.floor += (this.env - this.floor) * Math.min(1, dt * 2); else this.floor *= 1 + dt * 0.03;
+      this.floor = clamp(this.floor, 0.0008, 0.05);
+      micLvl = clamp((this.env - this.floor * 1.8) / (this.floor * 4 + 0.004));
+      if (micLvl > 0.25) this.activeT += dt; else { if (this.activeT > 0.45) this.onExhale?.(clamp(this.activeT / 2.5, 0.35, 1.2)); this.activeT = 0; }
+    }
+    if (this.held) this.holdT += dt;
+    const gripLvl = this.held ? clamp(this.holdT / 2.5) : 0;
+    this.level += (Math.max(micLvl, gripLvl) - this.level) * Math.min(1, dt * 4);
+    music.breath = this.level;
+  },
+};
+
+/* ───────────────────────── reloj y estado ───────────────────────── */
+const clock = { t: 0, last: performance.now() / 1000 };
+const SPEED = Math.max(0.1, Number(new URLSearchParams(location.search).get('speed')) || 1);
+const input = { trigger: false, triggerT: 0 };
+const head = new V3(0, 1.6, 0), fwd = new V3(0, 0, -1);
+const desk = { yaw: 0, pitch: -0.05, drag: false, lx: 0, ly: 0 };
+let wave = { r: 0, a: 0, o: new V3() };
+function emitWave(o, a = 1) { wave.o.copy(o); wave.r = 0.2; wave.a = a; }
+
+/* ───────────────────────── momentos ───────────────────────── */
+const scene0 = new THREE.Group();
+const poem = new Card(1.6, 380, { dist: 2.2, dy: 0.05 });
+const label = new Card(1.0, 220, { dist: 1.9, dy: -0.55 });
+let groundG;
+function buildGround() {
+  rnd = mulberry32(5); const g = new Geo();
+  for (let i = 0; i < 2600; i++) { const a = rnd() * TAU, r = Math.sqrt(rnd()) * 28; g.pt(new V3(Math.cos(a) * r, 0.005, Math.sin(a) * r), jit(PAL.ground, 0.3).multiplyScalar(0.55), R(0.015, 0.03), 0); }
+  return g.build({ pointOp: 0.5, twinkle: 0.5 });
+}
+
+/* I · Inmersión en la selva */
+function buildM1() {
+  rnd = mulberry32(11);
+  const f = new Geo(), lg = new Geo(), lf = new Geo();
+  tree(f, 0.5, -2.4, 15, { lg, lichens: 26, leafGeo: lf, usnea: 0.7, lichRev: () => rnd() * 0.25, radius: 0.42 });
+  tree(f, -1.9, 1.2, 12, { lg, lichens: 14, leafGeo: lf, usnea: 0.6, lichRev: () => 0.1 + rnd() * 0.3, radius: 0.3 });
+  const trees = [[0.5, -2.4], [-1.9, 1.2]]; let tries = 0;
+  while (trees.length < 34 && tries++ < 800) {
+    const a = rnd() * TAU, r = 2.6 + Math.pow(rnd(), 0.8) * 21, x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (trees.some(([tx, tz]) => Math.hypot(tx - x, tz - z) < 2.3)) continue;
+    trees.push([x, z]);
+    tree(f, x, z, R(9, 22), { lg, lichens: Math.round(R(5, 12)), leafGeo: lf, usnea: 0.35, lichRev: () => 0.05 + 0.7 * (r / 24) + 0.25 * rnd() });
+  }
+  for (let i = 0; i < 8; i++) { const a = rnd() * TAU, r = R(1.4, 6); smallRock(f, lg, new V3(Math.cos(a) * r, R(0.05, 0.2), Math.sin(a) * r), R(0.2, 0.55), 0, 0.05 + r / 24 + rnd() * 0.2); }
+  for (let i = 0; i < 34; i++) { const a = rnd() * TAU, r = R(1.2, 12), b = new V3(Math.cos(a) * r, 0, Math.sin(a) * r); for (let k = 0; k < 6; k++) fern(lf, b, k / 6 * TAU + R(-0.3, 0.3), R(0.5, 1.1), 0, jit(PAL.leaf2, 0.3).multiplyScalar(0.8)); }
+  for (let i = 0; i < 5; i++) { const a = rnd() * TAU, r = R(2.5, 7); nalca(lf, new V3(Math.cos(a) * r, 0, Math.sin(a) * r)); }
+  for (let i = 0; i < 40; i++) { const a = rnd() * TAU, r = R(0.8, 7); const P = new V3(Math.cos(a) * r, 0.004, Math.sin(a) * r); if (rnd() < 0.5) cladonia(lg, P, 0.05 + r / 24 + rnd() * 0.2); else lichenPatch(lg, P, Y, R(0.05, 0.14), pick(PAL.lich), 0.05 + r / 24 + rnd() * 0.2, 0.05, 30); }
+  for (let i = 0; i < 1600; i++) { const a = rnd() * TAU, r = Math.sqrt(rnd()) * 22; f.pt(new V3(Math.cos(a) * r, R(0, 0.06), Math.sin(a) * r), jit(PAL.moss, 0.3), R(0.015, 0.03), 0); }
+  const forest = f.build({ lineOp: 0.3, pointOp: 0.4 }), lich = lg.build({ twinkle: 0.4, reveal: 0 }), leaves = lf.build({ lineOp: 0.35, pointOp: 0.5, twinkle: 0.3 });
+  const g = new THREE.Group(); g.add(forest.group, leaves.group, lich.group);
+  return { g, forest, lich, leaves };
+}
+
+/* II · Deconstrucción y ancestros */
+function buildM2() {
+  rnd = mulberry32(23);
+  const C = new V3(0, 1.45, -1.3), N = 7000;
+  const cols = [];
+  while (cols.length < 7) {
+    const c = C.clone().add(new V3(R(-0.6, 0.6), R(-0.38, 0.38), R(-0.3, 0.3)));
+    if (cols.some((o) => o.c.distanceTo(c) < 0.3)) continue;
+    const cells = []; const nc = 3 + Math.floor(rnd() * 4);
+    for (let k = 0; k < nc; k++) cells.push({ p: c.clone().add(randIn(0.06)), r: R(0.03, 0.05) });
+    cols.push({ c, cells, R: 0.13 });
+  }
+  const curves = [];
+  for (let i = 0; i < 9; i++) {
+    const a = cols[i % 7], b = cols[(i * 3 + 2) % 7];
+    const s = C.clone().add(randDir().multiplyScalar(R(0.8, 1.1))), e = C.clone().add(randDir().multiplyScalar(R(0.8, 1.1)));
+    const pa = a.c.clone().add(randDir().multiplyScalar(a.R * 1.1)), pb = b.c.clone().add(randDir().multiplyScalar(b.R * 1.1));
+    curves.push(new THREE.CatmullRomCurve3([s, s.clone().lerp(pa, 0.5).add(randIn(0.15)), pa, pa.clone().lerp(pb, 0.5).add(randIn(0.12)), pb, e]));
+  }
+  for (let i = 0; i < 9; i++) { const base = curves[i].getPoint(R(0.25, 0.75)); const end = base.clone().add(randDir().multiplyScalar(R(0.25, 0.5))); curves.push(new THREE.CatmullRomCurve3([base, base.clone().lerp(end, 0.5).add(randIn(0.08)), end])); }
+  const home = new Float32Array(N * 3), scat = new Float32Array(N * 3), tg = new Float32Array(N * 3), tg2 = new Float32Array(N * 3), cH = new Float32Array(N * 3), cT = new Float32Array(N * 3), swirl = new Float32Array(N * 3);
+  const lobes = 7, ph0 = rnd() * TAU; const apo = []; for (let k = 0; k < 14; k++) { const a = rnd() * TAU, f = R(0.3, 0.75); apo.push([Math.cos(a) * f * 0.34, Math.sin(a) * f * 0.34, R(0.02, 0.035)]); }
+  const mint = col('#a8ffe0');
+  const dp = dynPoints(N, { twinkle: 0.25, maxSize: 24 });
+  for (let i = 0; i < N; i++) {
+    const a = rnd() * TAU, f = Math.sqrt(rnd());
+    const edge = 0.42 * (0.6 + 0.27 * Math.abs(Math.cos(lobes * a / 2 + ph0)) + 0.13 * noise(Math.cos(a) * 2, Math.sin(a) * 2, 0.5));
+    const rr = edge * f; let x = Math.cos(a) * rr, y = Math.sin(a) * rr, z = 0.05 * Math.sin(f * Math.PI) + 0.02 * noise(x * 8, y * 8, 1);
+    let c = mint.clone().lerp(PAL.lich[0], f); if (Math.sin(f * 30) > 0.8) c.multiplyScalar(1.4);
+    for (const [ax, ay, ar] of apo) if ((x - ax) ** 2 + (y - ay) ** 2 < ar * ar) { c = PAL.lich[1].clone(); z += 0.02; }
+    home.set([C.x + x, C.y + y, C.z + z], i * 3);
+    const sd = randDir().multiplyScalar(R(0.35, 1.25)); scat.set([C.x + x + sd.x, C.y + y + sd.y + 0.15, C.z + z + sd.z], i * 3);
+    const sw = randDir(); swirl.set([sw.x, sw.y, sw.z], i * 3);
+    let t, ct, t2;
+    if (i < N * 0.4) { const col_ = pick(cols), cell = pick(col_.cells); t = cell.p.clone().add(randDir().multiplyScalar(cell.r)); ct = PAL.alga.clone().lerp(PAL.alga2, rnd() * 0.6); t2 = t; }
+    else { const cv = pick(curves); t = cv.getPoint(rnd()).add(randIn(0.006)); ct = PAL.fung.clone().lerp(PAL.fung2, rnd() * 0.5); t2 = t; if (rnd() < 0.35) { const col_ = pick(cols); t2 = col_.c.clone().add(randDir().multiplyScalar(col_.R * R(0.97, 1.03))); ct = PAL.fung2.clone().lerp(PAL.fung, rnd() * 0.4); } }
+    tg.set([t.x, t.y, t.z], i * 3); tg2.set([t2.x, t2.y, t2.z], i * 3);
+    cH.set([c.r, c.g, c.b], i * 3); cT.set([ct.r, ct.g, ct.b], i * 3);
+    dp.a.aSize[i] = R(0.008, 0.016);
+  }
+  dp.a.position.set(home); dp.a.aColor.set(cH);
+  const hy = new Geo();
+  curves.forEach((cv, i) => { const pts = cv.getPoints(70); hy.poly(pts, PAL.fung, i < 9 ? 0 : 0.45, i < 9 ? 0.6 : 0.95, 0, 0, PAL.fung2); });
+  const cl = new Geo();
+  for (const c_ of cols) for (const cell of c_.cells) for (let k = 0; k < 3; k++) { const ax = randDir(); const [T, B] = basis(ax); const ring = []; for (let j = 0; j <= 24; j++) { const a = j / 24 * TAU; ring.push(cell.p.clone().addScaledVector(T, Math.cos(a) * cell.r).addScaledVector(B, Math.sin(a) * cell.r)); } cl.poly(ring, PAL.alga.clone().multiplyScalar(0.8), 0, 0); }
+  const mem = new Geo();
+  for (const c_ of cols) { const pts = []; const turns = R(7, 11), sp = rnd() * TAU; for (let j = 0; j <= 160; j++) { const u = j / 160, th = Math.acos(1 - 2 * u), phi = u * TAU * turns + sp; pts.push(c_.c.clone().add(new V3(Math.sin(th) * Math.cos(phi), Math.cos(th), Math.sin(th) * Math.sin(phi)).multiplyScalar(c_.R))); } mem.poly(pts, PAL.fung2, 0, 1, 0, 0, PAL.fung); }
+  const NM = 46, mol = dynLines(NM * 6, { opacity: 0 });
+  const mols = []; for (let i = 0; i < NM; i++) { const c_ = pick(cols), cell = pick(c_.cells); mols.push({ a: cell.p.clone(), b: pick(curves.slice(0, 9)).getPoint(rnd()), ph: rnd(), sp: R(0.06, 0.14), s: R(0.012, 0.02), sugar: rnd() < 0.5, rot: rnd() * TAU }); }
+  for (let i = 0; i < NM; i++) { const c_ = mols[i].sugar ? PAL.sugar : PAL.water; for (let k = 0; k < 12; k++) mol.a.aColor.set([c_.r, c_.g, c_.b], (i * 12 + k) * 3); }
+  const g = new THREE.Group(); const hyB = hy.build({ reveal: 0 }), clB = cl.build({ reveal: 0, lineOp: 0.5 }), memB = mem.build({ reveal: 0 });
+  g.add(dp.points, hyB.group, clB.group, memB.group, mol.lines);
+  const nearest = cols.reduce((b, c_) => (c_.c.z > b.c.z ? c_ : b), cols[0]);
+  return { g, C, N, dp, home, scat, tg, tg2, cH, cT, swirl, hy: hyB, cl: clB, mem: memB, mol, mols, pivot: nearest.c.clone() };
+}
+
+/* III · Inmersión microscópica */
+function buildM3() {
+  rnd = mulberry32(31);
+  const H = new V3(0, 1.6, 0);
+  const cells = [
+    { p: new V3(-1.8, 1.9, -2.4), r: 0.8 }, { p: new V3(1.9, 2.5, -2.6), r: 0.62 }, { p: new V3(0.4, 0.55, -3.0), r: 0.6 },
+    { p: new V3(-2.6, 2.6, 1.2), r: 0.75 }, { p: new V3(2.5, 1.2, 1.5), r: 0.6 }, { p: new V3(-0.3, 4.1, -0.8), r: 0.7 }, { p: new V3(-2.9, 0.7, -0.5), r: 0.55 },
+  ];
+  const g = new Geo();
+  for (const c of cells) {
+    const n = 950, ax = randDir(); c.ax = ax;
+    for (let i = 0; i < n; i++) { const y = 1 - (i + 0.5) / n * 2, rr = Math.sqrt(1 - y * y), th = i * 2.39996; const d = new V3(Math.cos(th) * rr, y, Math.sin(th) * rr); g.pt(c.p.clone().addScaledVector(d, c.r), jit(PAL.alga, 0.2).multiplyScalar(0.7), 0.022, 0, rnd()); if (i % 2 === 0) g.pt(c.p.clone().addScaledVector(d, c.r * 0.93), jit(PAL.alga2, 0.2).multiplyScalar(0.5), 0.016, 0); }
+    for (let i = 0; i < 700; i++) { const d = randDir(); if (d.dot(ax) > 0.25) continue; g.pt(c.p.clone().addScaledVector(d, c.r * R(0.55, 0.85)), jit(PAL.alga2, 0.2), R(0.02, 0.035), 0); }
+    for (let i = 0; i < 140; i++) g.pt(c.p.clone().addScaledVector(ax, -c.r * 0.25).add(randIn(c.r * 0.16)), col('#eaffd0'), 0.026, 0);
+    for (let k = 0; k < 3; k++) { const [T, B] = basis(k === 0 ? ax : randDir()); const ring = []; for (let j = 0; j <= 64; j++) { const a = j / 64 * TAU; ring.push(c.p.clone().addScaledVector(T, Math.cos(a) * c.r * 1.01).addScaledVector(B, Math.sin(a) * c.r * 1.01)); } g.poly(ring, PAL.alga.clone().multiplyScalar(0.9)); }
+  }
+  const curves = [], contacts = [];
+  const pairs = [[0, 2], [1, 5], [3, 6], [4, 1], [2, 4], [5, 3], [6, 0]];
+  for (const [ia, ib] of pairs) {
+    const A = cells[ia], B = cells[ib], tubeR = R(0.11, 0.17);
+    const wrap = (C_, toward) => { const ax = randDir(); const [T, Bv] = basis(ax); const pts = []; const a0 = rnd() * TAU; for (let k = 0; k < 4; k++) { const a = a0 + k / 3 * Math.PI * 0.85; pts.push(C_.p.clone().addScaledVector(T, Math.cos(a) * (C_.r + tubeR + 0.02)).addScaledVector(Bv, Math.sin(a) * (C_.r + tubeR + 0.02))); } contacts.push({ cell: C_, hp: pts[1].clone().lerp(pts[2], 0.5), tubeR }); return pts; };
+    const wa = wrap(A), wb = wrap(B);
+    const s = A.p.clone().add(randDir().multiplyScalar(6)), e = B.p.clone().add(randDir().multiplyScalar(6));
+    const mid = wa[3].clone().lerp(wb[0], 0.5); const dh = mid.clone().sub(H); if (dh.length() < 1.4) mid.copy(H).addScaledVector(dh.normalize(), 1.6);
+    const cv = new THREE.CatmullRomCurve3([s, ...wa, mid, ...wb, e]); cv.tubeR = tubeR; curves.push(cv);
+    const NSm = 160, pts = cv.getSpacedPoints(NSm), fr = cv.computeFrenetFrames(NSm, false);
+    for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; const line = pts.map((p, i) => p.clone().addScaledVector(fr.normals[i], Math.cos(a) * tubeR).addScaledVector(fr.binormals[i], Math.sin(a) * tubeR)); g.poly(line, jit(PAL.fung, 0.15).multiplyScalar(0.85)); }
+    for (let i = 0; i <= NSm; i += 4) { const ring = []; for (let k = 0; k <= 12; k++) { const a = k / 12 * TAU; ring.push(pts[i].clone().addScaledVector(fr.normals[i], Math.cos(a) * tubeR).addScaledVector(fr.binormals[i], Math.sin(a) * tubeR)); } g.poly(ring, i % 28 === 0 ? PAL.fung2 : PAL.fung.clone().multiplyScalar(0.35)); }
+  }
+  for (let i = 0; i < 1400; i++) { const d = randDir(), r = R(2, 9); const p = H.clone().addScaledVector(d, r); if (p.y < -1) continue; g.pt(p, jit(PAL.water, 0.4).multiplyScalar(0.4), R(0.01, 0.025), 0); }
+  const NS = 840, stream = dynPoints(NS, { twinkle: 0, maxSize: 30 });
+  const sdat = []; for (let i = 0; i < NS; i++) { const cv = curves[i % curves.length]; sdat.push({ cv, u: rnd(), sp: R(0.006, 0.02) * (rnd() < 0.5 ? 1 : -1), off: randIn(cv.tubeR * 0.7) }); const c_ = jit(rnd() < 0.7 ? PAL.fung : PAL.fung2, 0.2); stream.a.aColor.set([c_.r, c_.g, c_.b], i * 3); stream.a.aSize[i] = R(0.02, 0.04); }
+  const NX = 1400, ex = dynPoints(NX, { twinkle: 0.2, maxSize: 34 });
+  const xdat = [];
+  for (let i = 0; i < NX; i++) {
+    const ct = pick(contacts), sugar = rnd() < 0.5;
+    const toH = ct.hp.clone().sub(ct.cell.p).normalize();
+    const a = ct.cell.p.clone().addScaledVector(toH, ct.cell.r).add(randIn(0.12)), b = ct.hp.clone().add(randIn(ct.tubeR * 0.8));
+    const m = a.clone().lerp(b, 0.5).add(randIn(0.18));
+    xdat.push({ from: sugar ? a : b, to: sugar ? b : a, m, u: rnd(), sp: R(0.15, 0.35) });
+    const c_ = sugar ? PAL.sugar : PAL.water; ex.a.aColor.set([c_.r, c_.g, c_.b], i * 3); ex.a.aSize[i] = R(0.018, 0.03);
+  }
+  const base = g.build({ lineOp: 0.75, pointOp: 0.9, twinkle: 0.3 });
+  const grp = new THREE.Group(); grp.add(base.group, stream.points, ex.points);
+  return { g: grp, base, stream, sdat, ex, xdat, cells };
+}
+
+/* IV · Génesis del suelo */
+function buildM4() {
+  rnd = mulberry32(41);
+  const C = new V3(0, 0.42, -2.6), S = new V3(1.35, 0.95, 1.1);
+  const w = icoWire(3), seed = 3.3;
+  const vInfo = w.dirs.map((d) => ({ d, r0: 1 + 0.22 * noise(d.x * 1.6 + seed, d.y * 1.6, d.z * 1.6) + 0.07 * noise(d.x * 4 + seed, d.y * 4, d.z * 4), e: 0.3 + 0.22 * (noise(d.x * 3, d.y * 3 + seed, d.z * 3) + 1) * 0.5 + 0.3 * Math.max(d.y, 0) }));
+  const info = (d) => ({ d, r0: 1 + 0.22 * noise(d.x * 1.6 + seed, d.y * 1.6, d.z * 1.6) + 0.07 * noise(d.x * 4 + seed, d.y * 4, d.z * 4), e: 0.3 + 0.22 * (noise(d.x * 3, d.y * 3 + seed, d.z * 3) + 1) * 0.5 + 0.3 * Math.max(d.y, 0) });
+  const surf = (v, P, out, lift = 0) => { const r = v.r0 * (1 - P * v.e) + lift; out.set(C.x + S.x * v.d.x * r, Math.max(0.0, C.y + S.y * v.d.y * r), C.z + S.z * v.d.z * r); return out; };
+  const nE = w.edges.length / 2, rock = dynLines(nE, { opacity: 0.7 });
+  for (let i = 0; i < nE; i++) for (let k = 0; k < 2; k++) { const v = vInfo[w.edges[i * 2 + k]]; const c_ = PAL.rock.clone().lerp(PAL.rockHi, clamp(v.d.y * 0.5 + 0.4)).multiplyScalar(0.8); rock.a.aColor.set([c_.r, c_.g, c_.b], (i * 2 + k) * 3); }
+  const vpos = w.dirs.map(() => new V3());
+  const lich = []; const NLC = 30, PER = 170;
+  for (let c = 0; c < NLC; c++) {
+    let sd; do { sd = randDir(); } while (sd.y < -0.05);
+    const [T, B] = basis(sd), maxA = R(0.12, 0.32), c_ = pick(PAL.lich), lobes = 3 + Math.floor(rnd() * 4), ph = rnd() * TAU, r0 = R(0, 0.3);
+    for (let i = 0; i < PER; i++) {
+      const phi = rnd() * TAU, al = maxA * Math.sqrt(rnd()) * (0.75 + 0.25 * Math.cos(lobes * phi + ph));
+      const d = sd.clone().multiplyScalar(Math.cos(al)).addScaledVector(T, Math.cos(phi) * Math.sin(al)).addScaledVector(B, Math.sin(phi) * Math.sin(al)).normalize();
+      lich.push({ v: info(d), c: jit(c_, 0.25), rev: r0 + (al / maxA) * 0.55 });
+    }
+  }
+  const lp = dynPoints(lich.length, { twinkle: 0.3, reveal: 0, maxSize: 26 });
+  lich.forEach((l, i) => { lp.a.aColor.set([l.c.r, l.c.g, l.c.b], i * 3); lp.a.aSize[i] = R(0.014, 0.024); lp.a.aReveal[i] = l.rev; });
+  lp.geo.attributes.aReveal.needsUpdate = true;
+  const cracks = [];
+  for (let k = 0; k < 16; k++) {
+    let d; do { d = randDir(); } while (d.y < 0.05); const pts = [info(d.clone())]; const dir = randDir();
+    for (let i = 0; i < 22; i++) { dir.add(randDir().multiplyScalar(0.5)).normalize(); d = d.clone().addScaledVector(dir, 0.06).normalize(); pts.push(info(d)); }
+    cracks.push({ pts, rev: R(0.15, 0.85) });
+  }
+  const nCS = cracks.reduce((s, c) => s + c.pts.length - 1, 0), cr = dynLines(nCS, { opacity: 1, reveal: 0 });
+  { let si = 0; for (const c of cracks) for (let i = 0; i < c.pts.length - 1; i++, si++) { cr.a.aReveal[si * 2] = c.rev + i * 0.006; cr.a.aReveal[si * 2 + 1] = c.rev + (i + 1) * 0.006; cr.a.aColor.set([PAL.crack.r, PAL.crack.g, PAL.crack.b, PAL.crack.r, PAL.crack.g, PAL.crack.b], si * 6); } cr.geo.attributes.aReveal.needsUpdate = true; cr.geo.attributes.aColor.needsUpdate = true; }
+  const sg = new Geo();
+  for (let i = 0; i < 6500; i++) {
+    const a = rnd() * TAU, q = 1 + Math.pow(rnd(), 1.6) * 1.9, fx = S.x * 1.05 * q, fz = S.z * 1.05 * q;
+    const x = C.x + Math.cos(a) * fx, z = C.z + Math.sin(a) * fz, y = 0.004 + 0.2 * Math.exp(-(q - 1) * 1.8) * rnd();
+    sg.pt(new V3(x, y, z), jit(pick(PAL.soil), 0.3).multiplyScalar(0.85), R(0.012, 0.03), 0.05 + 0.8 * (q - 1) / 1.9 + 0.12 * rnd());
+  }
+  const soil = sg.build({ reveal: 0, twinkle: 0.35, pointOp: 0.9 });
+  const NF = 1400, fr = dynPoints(NF, { twinkle: 0, maxSize: 28 }); const frag = []; for (let i = 0; i < NF; i++) { frag.push({ p: new V3(), v: new V3(), life: 0 }); const c_ = rnd() < 0.5 ? pick(PAL.soil) : PAL.rockHi; fr.a.aColor.set([c_.r, c_.g, c_.b], i * 3); }
+  const NT = 160, trail = dynLines(NT, { opacity: 1 }); const tpos = [];
+  const sunP = dynPoints(2, { twinkle: 0, maxSize: 90 }); sunP.a.aColor.set([PAL.sun.r, PAL.sun.g, PAL.sun.b, 0.6, 0.7, 1.0]); sunP.a.aSize[0] = 0.9; sunP.a.aSize[1] = 0.5; sunP.geo.attributes.aColor.needsUpdate = true;
+  const g = new THREE.Group(); g.add(rock.lines, lp.points, cr.lines, soil.group, fr.points, trail.lines, sunP.points);
+  return { g, C, S, w, vInfo, vpos, rock, lich, lp, cracks, cr, surf, soil, fr, frag, trail, tpos, NT, sunP, lastP: -1 };
+}
+function updateRock(m, P) {
+  const tmp = new V3();
+  m.vInfo.forEach((v, i) => m.surf(v, P, m.vpos[i]));
+  const pa = m.rock.a.position, E = m.w.edges;
+  for (let i = 0; i < E.length; i++) { const p = m.vpos[E[i]]; pa[i * 3] = p.x; pa[i * 3 + 1] = p.y; pa[i * 3 + 2] = p.z; }
+  m.rock.geo.attributes.position.needsUpdate = true;
+  const lp = m.lp.a.position; m.lich.forEach((l, i) => { m.surf(l.v, P, tmp, 0.012); lp[i * 3] = tmp.x; lp[i * 3 + 1] = tmp.y; lp[i * 3 + 2] = tmp.z; });
+  m.lp.geo.attributes.position.needsUpdate = true;
+  const cp = m.cr.a.position; let si = 0;
+  for (const c of m.cracks) for (let i = 0; i < c.pts.length - 1; i++, si++) { m.surf(c.pts[i], P, tmp, 0.006); cp.set([tmp.x, tmp.y, tmp.z], si * 6); m.surf(c.pts[i + 1], P, tmp, 0.006); cp.set([tmp.x, tmp.y, tmp.z], si * 6 + 3); }
+  m.cr.geo.attributes.position.needsUpdate = true;
+}
+
+/* V · Sucesión ecológica */
+function buildM5(rockC) {
+  rnd = mulberry32(53);
+  const anchors = [];
+  const dist = (x, z) => Math.hypot(x - rockC.x, z - rockC.z);
+  const okPos = (x, z, minUser = 0.9) => Math.hypot(x, z) > minUser && dist(x, z) > 1.7;
+  const st = [new Geo(), new Geo(), new Geo(), new Geo()]; const lg4 = new Geo(), lf4 = new Geo();
+  // 1 · pioneras
+  for (let i = 0; i < 260; i++) {
+    const a = rnd() * TAU, r = 1.3 + Math.pow(rnd(), 0.9) * 10, x = rockC.x + Math.cos(a) * r, z = rockC.z + Math.sin(a) * r; if (!okPos(x, z, 0.6) && r > 2) continue;
+    const rv = 0.75 * clamp((r - 1.3) / 10) + 0.2 * rnd(), P = new V3(x, 0.01, z);
+    for (let k = 0; k < 12; k++) st[0].pt(P.clone().add(new V3(R(-0.08, 0.08), R(0, 0.04), R(-0.08, 0.08))), jit(PAL.moss, 0.3).multiplyScalar(1.6), R(0.015, 0.03), rv + 0.02 * rnd());
+    if (i % 3 === 0) anchors.push({ p: P, kind: 'moss' });
+  }
+  for (let i = 0; i < 320; i++) {
+    const a = rnd() * TAU, r = 1.4 + Math.pow(rnd(), 0.8) * 11, x = rockC.x + Math.cos(a) * r, z = rockC.z + Math.sin(a) * r;
+    const rv = 0.75 * clamp((r - 1.4) / 11) + 0.2 * rnd(), b = new V3(x, 0, z), h = R(0.05, 0.16), top = b.clone().add(new V3(R(-0.02, 0.02), h, R(-0.02, 0.02)));
+    st[0].seg(b, top, PAL.leaf2, rv, rv + 0.02); const la = rnd() * TAU;
+    for (const s of [0, Math.PI]) st[0].seg(top, top.clone().add(new V3(Math.cos(la + s) * 0.04, 0.015, Math.sin(la + s) * 0.04)), PAL.leaf, rv + 0.02, rv + 0.03);
+  }
+  for (let i = 0; i < 70; i++) { const a = rnd() * TAU, r = R(1.3, 8), P = new V3(rockC.x + Math.cos(a) * r, 0.006, rockC.z + Math.sin(a) * r); if (rnd() < 0.5) cladonia(st[0], P, 0.7 * r / 8); else lichenPatch(st[0], P, Y, R(0.05, 0.12), pick(PAL.lich), 0.7 * r / 8, 0.05, 26); }
+  // 2 · pastos
+  for (let i = 0; i < 3600; i++) {
+    const a = rnd() * TAU, r = Math.pow(rnd(), 0.75) * 16, x = Math.cos(a) * r + rockC.x * (1 - r / 16), z = Math.sin(a) * r + rockC.z * (1 - r / 16);
+    if (Math.hypot(x, z) < 0.45 || dist(x, z) < 1.55) continue;
+    const rv = 0.78 * clamp(dist(x, z) / 17) + 0.18 * rnd(), h = R(0.15, 0.6), lean = new V3(R(-0.2, 0.2), 0, R(-0.2, 0.2));
+    const pts = []; for (let k = 0; k <= 3; k++) { const f = k / 3; pts.push(new V3(x + lean.x * f * f * h, f * h, z + lean.z * f * f * h)); }
+    st[1].poly(pts, PAL.moss.clone().multiplyScalar(1.4), rv, rv + 0.03, 0, 0, jit(PAL.lich[0], 0.2));
+    if (rnd() < 0.08) st[1].pt(pts[3], pick([PAL.chilco, PAL.ulmo, PAL.lich[0], PAL.lich[5]]), 0.03, rv + 0.04);
+    if (i % 25 === 0) anchors.push({ p: new V3(x, 0.02, z), kind: 'grass' });
+  }
+  // 3 · renoval
+  for (let i = 0; i < 70; i++) {
+    const a = rnd() * TAU, r = R(2.5, 14), x = rockC.x + Math.cos(a) * r, z = rockC.z + Math.sin(a) * r; if (!okPos(x, z, 1.6)) continue;
+    const rv = 0.7 * clamp(dist(x, z) / 15) + 0.2 * rnd(), b = new V3(x, 0, z), hh = R(0.8, 1.8);
+    for (let k = 0; k < 7; k++) { const d = new V3(R(-0.6, 0.6), 1, R(-0.6, 0.6)).normalize(); const tip = b.clone().addScaledVector(d, hh); st[2].poly([b, b.clone().lerp(tip, 0.5).add(new V3(R(-0.1, 0.1), 0, R(-0.1, 0.1))), tip], PAL.trunk.clone().multiplyScalar(0.8), rv, rv + 0.06); for (let q = 0; q < 5; q++) st[2].pt(tip.clone().add(randIn(0.3)), jit(PAL.leaf, 0.3), 0.03, rv + 0.06 + 0.02 * rnd()); if (rnd() < 0.6) for (let q = 0; q < 3; q++) st[2].pt(tip.clone().add(randIn(0.25)).add(new V3(0, -0.1, 0)), PAL.chilco, 0.04, rv + 0.08); }
+    anchors.push({ p: new V3(x, 0.02, z), kind: 'shrub' });
+  }
+  for (let i = 0; i < 42; i++) {
+    const a = rnd() * TAU, r = R(3, 16), x = rockC.x + Math.cos(a) * r, z = rockC.z + Math.sin(a) * r; if (!okPos(x, z, 1.8)) continue;
+    const rv = 0.6 * clamp(dist(x, z) / 17) + 0.15 * rnd();
+    tree(st[2], x, z, R(2.5, 5.5), { rev: rv, span: 0.25, depth: 1, leafPts: 10, sides: 4, radius: 0.05 });
+    anchors.push({ p: new V3(x, 0.02, z), kind: 'sapling' });
+  }
+  // 4 · selva madura
+  const big = []; let tries = 0;
+  while (big.length < 30 && tries++ < 900) {
+    const a = rnd() * TAU, r = R(4, 24), x = rockC.x + Math.cos(a) * r, z = rockC.z + Math.sin(a) * r;
+    if (!okPos(x, z, 2.6) || big.some(([bx, bz]) => Math.hypot(bx - x, bz - z) < 3)) continue;
+    big.push([x, z]); const rv = 0.55 * clamp(dist(x, z) / 25) + 0.12 * rnd(), id = big.length;
+    tree(st[3], x, z, R(10, 24), { rev: rv, span: 0.32, lg: lg4, leafGeo: lf4, lichens: Math.round(R(4, 9)), usnea: 0.4, vine: rnd() < 0.35, flowers: rnd() < 0.4 ? 0.5 : 0, anchors, treeId: id, lichRev: (h) => rv + 0.15 + h * 0.01 });
+  }
+  for (let i = 0; i < 18; i++) { const a = rnd() * TAU, r = R(2, 10), x = rockC.x + Math.cos(a) * r, z = rockC.z + Math.sin(a) * r; if (!okPos(x, z, 1.8)) continue; nalca(st[3], new V3(x, 0, z), 0.4 * r / 10 + 0.2 * rnd()); }
+  for (let i = 0; i < 50; i++) { const a = rnd() * TAU, r = R(1.8, 14), x = rockC.x + Math.cos(a) * r, z = rockC.z + Math.sin(a) * r; if (!okPos(x, z, 1.2)) continue; const b = new V3(x, 0, z), rv = 0.5 * r / 14 + 0.2 * rnd(); for (let k = 0; k < 6; k++) fern(st[3], b, k / 6 * TAU + R(-0.3, 0.3), R(0.5, 1.2), rv); }
+  const stages = st.map((s, i) => s.build({ reveal: 0, lineOp: [0.8, 0.55, 0.6, 0.4][i], pointOp: 0.9, twinkle: 0.3 }));
+  const lich4 = lg4.build({ reveal: 0, twinkle: 0.4 }), leaf4 = lf4.build({ reveal: 0, pointOp: 0.6, twinkle: 0.3 });
+  const NB = 240, ring = dynPoints(NB, { twinkle: 0.4, maxSize: 30 }); for (let i = 0; i < NB; i++) { const c_ = jit(i % 3 ? PAL.leaf : PAL.water, 0.3); ring.a.aColor.set([c_.r, c_.g, c_.b], i * 3); ring.a.aSize[i] = R(0.015, 0.03); }
+  ring.geo.attributes.aColor.needsUpdate = true;
+  const g = new THREE.Group(); stages.forEach((s) => g.add(s.group)); g.add(lich4.group, leaf4.group, ring.points);
+  return { g, stages, lich4, leaf4, ring, anchors };
+}
+
+/* VI · Red viva */
+function buildM6(anchors, rockC) {
+  rnd = mulberry32(61);
+  const nodes = [{ p: new V3(0, 0.02, 0), kind: 'you' }, { p: new V3(rockC.x, 0.6, rockC.z), kind: 'rock' }, ...anchors];
+  const n = nodes.length, adj = nodes.map(() => []);
+  const ground = (k) => ['you', 'rock', 'base', 'moss', 'grass', 'shrub', 'sapling'].includes(k);
+  for (let i = 0; i < n; i++) {
+    if (!ground(nodes[i].kind)) continue;
+    const near = []; for (let j = 0; j < n; j++) if (j !== i && ground(nodes[j].kind)) { const d = nodes[i].p.distanceTo(nodes[j].p); if (d < 7) near.push([d, j]); }
+    near.sort((a, b) => a[0] - b[0]); for (const [d, j] of near.slice(0, 3)) { adj[i].push([j, d]); adj[j].push([i, d]); }
+  }
+  const byTree = {}; nodes.forEach((nd, i) => { if (nd.tree) (byTree[nd.tree] ||= []).push(i); });
+  for (const id in byTree) {
+    const idx = byTree[id], base = idx.find((i) => nodes[i].kind === 'base'); if (base === undefined) continue;
+    for (const i of idx) if (i !== base) { const d = nodes[i].p.distanceTo(nodes[base].p); adj[i].push([base, d]); adj[base].push([i, d]); }
+  }
+  const dist = new Array(n).fill(Infinity); dist[0] = 0; const done = new Array(n).fill(false);
+  for (let it = 0; it < n; it++) { let u = -1, best = Infinity; for (let i = 0; i < n; i++) if (!done[i] && dist[i] < best) { best = dist[i]; u = i; } if (u < 0) break; done[u] = true; for (const [v, w] of adj[u]) if (dist[u] + w < dist[v]) dist[v] = dist[u] + w; }
+  const maxD = Math.max(...dist.filter(isFinite));
+  const g = new Geo(); const K = 1 / 26; const seen = new Set();
+  for (let i = 0; i < n; i++) for (const [j] of adj[i]) {
+    const key = Math.min(i, j) + ':' + Math.max(i, j); if (seen.has(key) || !isFinite(dist[i]) || !isFinite(dist[j])) continue; seen.add(key);
+    const [a, b] = dist[i] <= dist[j] ? [i, j] : [j, i]; const A = nodes[a].p, B = nodes[b].p; const L = A.distanceTo(B), steps = Math.max(2, Math.ceil(L / 0.3));
+    const pts = []; const flat = ground(nodes[a].kind) && ground(nodes[b].kind);
+    for (let s = 0; s <= steps; s++) { const f = s / steps; const p = A.clone().lerp(B, f); if (flat) { p.x += 0.15 * noise(p.x * 0.8, 3, p.z * 0.8) * Math.sin(f * Math.PI); p.z += 0.15 * noise(p.x * 0.8, 7, p.z * 0.8) * Math.sin(f * Math.PI); p.y = 0.015; } pts.push(p); }
+    const c = flat ? PAL.net : PAL.lich[2];
+    g.poly(pts, c, dist[a] / maxD, dist[b] / maxD, dist[a] * K, K);
+  }
+  for (let i = 0; i < n; i++) if (isFinite(dist[i])) g.pt(nodes[i].p, i === 0 ? PAL.netHot : PAL.net, i === 0 ? 0.08 : 0.045, dist[i] / maxD, rnd(), dist[i] * K);
+  const net = g.build({ reveal: 0, lineOp: 0.22, pointOp: 0.6, twinkle: 0.2, maxSize: 34 });
+  return { g: net.group, net };
+}
+
+/* ───────────────────────── director ───────────────────────── */
+let M1, M2, M3, M4, M5, M6, ground;
+const MOM = [];
+const dir = { idx: -1, t: 0, started: false, fired: new Set(), P4: 0, sunA: 2.2, P5: 0, life: 0.3, stageShown: -1, years: 0 };
+function once(k, fn) { if (!dir.fired.has(k)) { dir.fired.add(k); fn(); } }
+function go(i) {
+  if (i >= MOM.length) return;
+  MOM[dir.idx]?.exit?.(); dir.idx = i; dir.t = 0; dir.fired.clear(); MOM[i].enter();
+}
+
+MOM.push({ // I
+  enter() { music.preset({ drone: 0.5, shimmer: 0.12, bell: 0.4 }); M1.g.visible = true; },
+  update(t) {
+    setOp(M1.forest, smooth(0, 10, t), 0.3, 0.4); setOp(M1.leaves, smooth(3, 14, t), 0.35, 0.55);
+    setU(M1.lich, 'uReveal', 0.02 + smooth(6, 40, t) * 1.05); setOp(M1.lich, 1);
+    once('a', () => poem.show('I', ['en la corteza,', 'una luz que no es del sol'], 9, '#43e8ff'));
+    if (t > 22) once('b', () => poem.show(null, ['liquen'], 7, '#d4ff3a'));
+    if (t > 34) once('c', () => music.set('pluck', 0.18));
+    return t > 54;
+  },
+});
+MOM.push({ // II
+  enter() { music.preset({ drone: 0.35, blip: 0.35, bell: 0.15, shimmer: 0.1 }); M2.g.visible = true; },
+  update(t, dt) {
+    const fo = 1 - smooth(0, 7, t); setOp(M1.forest, fo, 0.3, 0.4); setOp(M1.leaves, fo, 0.35, 0.55); setOp(M1.lich, 1 - smooth(2, 9, t));
+    if (fo <= 0) M1.g.visible = false;
+    const m = M2, k1 = smooth(18, 28, t), k2 = smooth(28, 42, t), k3 = smooth(44, 54, t), pa = m.dp.a.position, ca = m.dp.a.aColor;
+    m.dp.points.material.uniforms.uOpacity.value = smooth(3, 9, t);
+    const br = 1 + 0.02 * Math.sin(t * 1.4), e1 = ease(k1), e2 = ease(k2), cE = PAL.elem;
+    if (t < 62 || dir.zoomPending) {
+      for (let i = 0; i < m.N; i++) {
+        const j = i * 3; let x, y, z;
+        if (k2 <= 0) {
+          const hx = m.C.x + (m.home[j] - m.C.x) * br, hy = m.C.y + (m.home[j + 1] - m.C.y) * br, hz = m.home[j + 2];
+          const sw = k1 * (1 - k1) * 0.5 * Math.sin(t * 2 + i);
+          x = hx + (m.scat[j] - hx) * e1 + m.swirl[j] * sw; y = hy + (m.scat[j + 1] - hy) * e1 + m.swirl[j + 1] * sw; z = hz + (m.scat[j + 2] - hz) * e1 + m.swirl[j + 2] * sw;
+        } else {
+          const tx = m.tg[j] + (m.tg2[j] - m.tg[j]) * k3, ty = m.tg[j + 1] + (m.tg2[j + 1] - m.tg[j + 1]) * k3, tz = m.tg[j + 2] + (m.tg2[j + 2] - m.tg[j + 2]) * k3;
+          const wob = 0.003 * Math.sin(t * 2.2 + i * 0.7) * (1 - e2 * 0.5);
+          x = m.scat[j] + (tx - m.scat[j]) * e2 + wob; y = m.scat[j + 1] + (ty - m.scat[j + 1]) * e2 + wob; z = m.scat[j + 2] + (tz - m.scat[j + 2]) * e2;
+        }
+        pa[j] = x; pa[j + 1] = y; pa[j + 2] = z;
+        if (k1 > 0 && k1 < 1 || k2 > 0 && k2 < 1) for (let c = 0; c < 3; c++) { const ce = c === 0 ? cE.r : c === 1 ? cE.g : cE.b; const a = m.cH[j + c] + (ce - m.cH[j + c]) * k1; ca[j + c] = a + (m.cT[j + c] - a) * k2; }
+      }
+      m.dp.geo.attributes.position.needsUpdate = true; m.dp.geo.attributes.aColor.needsUpdate = true;
+    }
+    setU(m.hy, 'uReveal', smooth(30, 50, t) * 1.02); setU(m.cl, 'uReveal', smooth(34, 44, t) * 1.02); setU(m.mem, 'uReveal', smooth(44, 60, t) * 1.02);
+    const mo = smooth(48, 54, t); m.mol.lines.material.uniforms.uOpacity.value = mo;
+    if (mo > 0) {
+      const p = m.mol.a.position; const v = new V3();
+      m.mols.forEach((q, i) => {
+        const u = (q.ph + t * q.sp) % 1, f = q.sugar ? u : 1 - u; v.copy(q.a).lerp(q.b, f); v.y += Math.sin(u * Math.PI) * 0.06; q.rot += dt * 1.5;
+        for (let k = 0; k < 6; k++) { const a0 = q.rot + k / 6 * TAU, a1 = q.rot + (k + 1) / 6 * TAU; p.set([v.x + Math.cos(a0) * q.s, v.y + Math.sin(a0) * q.s, v.z, v.x + Math.cos(a1) * q.s, v.y + Math.sin(a1) * q.s, v.z], (i * 12 + k * 2) * 3); }
+      });
+      m.mol.geo.attributes.position.needsUpdate = true;
+    }
+    once('a', () => poem.show('II', ['deshacer la forma', 'hasta hallar a quienes la soñaron'], 10, '#c49bff'));
+    if (t > 30) once('p', () => music.set('pad', 0.22));
+    if (t > 46) once('b', () => poem.show(null, ['un hongo', 'abraza a un alga'], 9, '#ff3da8'));
+    return t > 66;
+  },
+});
+MOM.push({ // III
+  enter() { music.preset({ drone: 0.4, bass: 0.3, blip: 0.45, pad: 0.25, shimmer: 0.18 }); M3.g.visible = true; dir.flow = 1; },
+  update(t, dt) {
+    const z = ease(smooth(0, 7, t)), s = 1 + z * 13;
+    const A = M2.pivot.clone().lerp(head, z); M2.g.scale.setScalar(s); M2.g.position.copy(A).addScaledVector(M2.pivot, -s);
+    const o2 = 1 - smooth(3, 7, t); M2.dp.points.material.uniforms.uOpacity.value = o2; for (const b of [M2.hy, M2.cl, M2.mem]) setOp(b, o2); M2.mol.lines.material.uniforms.uOpacity.value = o2;
+    if (o2 <= 0) M2.g.visible = false;
+    const out = ease(smooth(54, 61, t)), sIn = 0.55 + 0.45 * ease(smooth(3, 9, t)), sc = sIn * (1 - out * 0.97);
+    const piv = out > 0 ? new V3(0, 1.0, -2.6) : head; M3.g.scale.setScalar(sc); M3.g.position.copy(piv).multiplyScalar(1 - sc);
+    const o3 = smooth(3, 9, t) * (1 - smooth(56, 61, t));
+    setOp(M3.base, o3, 0.75, 0.9); M3.stream.points.material.uniforms.uOpacity.value = o3; M3.ex.points.material.uniforms.uOpacity.value = o3;
+    dir.flow += ((input.trigger ? 3 : 1) - dir.flow) * Math.min(1, dt * 2);
+    const sp = M3.stream.a.position; M3.sdat.forEach((d, i) => { d.u = (d.u + d.sp * dt * dir.flow + 1) % 1; const p = d.cv.getPointAt(d.u); sp[i * 3] = p.x + d.off.x; sp[i * 3 + 1] = p.y + d.off.y; sp[i * 3 + 2] = p.z + d.off.z; M3.stream.a.aSize[i] = 0.03; });
+    M3.stream.geo.attributes.position.needsUpdate = true; M3.stream.geo.attributes.aSize.needsUpdate = true;
+    const xp = M3.ex.a.position; const ramp = smooth(8, 20, t);
+    M3.xdat.forEach((d, i) => { d.u = (d.u + d.sp * dt * dir.flow) % 1; const u = d.u, a = (1 - u) * (1 - u), b = 2 * u * (1 - u), c = u * u; xp[i * 3] = d.from.x * a + d.m.x * b + d.to.x * c; xp[i * 3 + 1] = d.from.y * a + d.m.y * b + d.to.y * c; xp[i * 3 + 2] = d.from.z * a + d.m.z * b + d.to.z * c; M3.ex.a.aSize[i] = 0.028 * ramp * Math.sin(u * Math.PI); });
+    M3.ex.geo.attributes.position.needsUpdate = true; M3.ex.geo.attributes.aSize.needsUpdate = true;
+    music.set('blip', input.trigger ? 0.7 : 0.45, 0.4);
+    if (t > 9) once('a', () => poem.show('III', ['adentro,', 'dos reinos respiran un mismo aire'], 10, '#46ff6e'));
+    if (t > 30) once('b', () => poem.show(null, ['azúcar por agua', 'abrigo por luz'], 9, '#ffd54a'));
+    return t > 61;
+  },
+  exit() { M3.g.visible = false; },
+});
+MOM.push({ // IV
+  enter() { music.preset({ drone: 0.45, shimmer: 0.08, tick: 0.5, bell: 0.12 }); M4.g.visible = true; ground.group.visible = true; dir.P4 = 0; updateRock(M4, 0); },
+  update(t, dt) {
+    const m = M4, fin = dir.P4 >= 1;
+    const op = smooth(0, 5, t); m.rock.lines.material.uniforms.uOpacity.value = 0.75 * op; m.lp.points.material.uniforms.uOpacity.value = op; m.cr.lines.material.uniforms.uOpacity.value = op; setOp(m.soil, op, 1, 0.9); setOp(ground, op * 0.5);
+    const rate = input.trigger ? 1 / 24 : 1 / 700;
+    const prev = dir.P4; if (t > 4 && !fin) dir.P4 = Math.min(1, dir.P4 + rate * dt);
+    const P = dir.P4, dP = P - prev;
+    if (Math.abs(P - m.lastP) > 1e-5) { updateRock(m, P); m.lastP = P; }
+    m.lp.points.material.uniforms.uReveal.value = 0.12 + P * 1.05; m.cr.lines.material.uniforms.uReveal.value = P * 1.1 - 0.05; setU(m.soil, 'uReveal', P * 1.08);
+    // fragmentos
+    dir.fragAcc = (dir.fragAcc ?? 0) + dP * 2600 + (input.trigger && !fin ? dt * 6 : 0);
+    const fa = m.fr.a; let spawn = Math.floor(dir.fragAcc); dir.fragAcc -= spawn;
+    for (let i = 0; i < m.frag.length; i++) {
+      const f = m.frag[i];
+      if (f.life <= 0 && spawn > 0) { spawn--; const l = m.lich[Math.floor(Math.random() * m.lich.length)]; m.surf(l.v, P, f.p, 0.02); f.v.set(l.v.d.x * 0.4 + (Math.random() - 0.5) * 0.3, 0.2 + Math.random() * 0.4, l.v.d.z * 0.4 + (Math.random() - 0.5) * 0.3); f.life = 3 + Math.random() * 2; f.ground = false; }
+      if (f.life > 0) {
+        f.life -= dt; if (!f.ground) { f.v.y -= 2.4 * dt; f.p.addScaledVector(f.v, dt); if (f.p.y <= 0.01) { f.p.y = 0.01; f.ground = true; } }
+        fa.position[i * 3] = f.p.x; fa.position[i * 3 + 1] = f.p.y; fa.position[i * 3 + 2] = f.p.z; fa.aSize[i] = 0.022 * clamp(f.life);
+      } else fa.aSize[i] = 0;
+    }
+    m.fr.geo.attributes.position.needsUpdate = true; m.fr.geo.attributes.aSize.needsUpdate = true; m.fr.points.material.uniforms.uOpacity.value = op;
+    // arco solar
+    const sp = input.trigger && !fin ? 4 : 0.08; dir.sunA += sp * dt;
+    const a = dir.sunA, sunPos = new V3(Math.cos(a) * 13, Math.sin(a) * 9 + 0.5, -15), moonPos = new V3(-sunPos.x, -sunPos.y + 1, -15);
+    m.sunP.a.position.set([sunPos.x, sunPos.y, sunPos.z, moonPos.x, moonPos.y, moonPos.z]); m.sunP.a.aSize[0] = sunPos.y > 0 ? 0.9 : 0; m.sunP.a.aSize[1] = moonPos.y > 0 ? 0.5 : 0;
+    m.sunP.geo.attributes.position.needsUpdate = true; m.sunP.geo.attributes.aSize.needsUpdate = true; m.sunP.points.material.uniforms.uOpacity.value = op;
+    m.tpos.unshift(sunPos.clone()); if (m.tpos.length > m.NT + 1) m.tpos.pop();
+    const tp = m.trail.a.position, tc = m.trail.a.aColor;
+    for (let i = 0; i < m.NT; i++) { const p0 = m.tpos[i] ?? sunPos, p1 = m.tpos[i + 1] ?? p0; tp.set([p0.x, p0.y, p0.z, p1.x, p1.y, p1.z], i * 6); const k0 = (1 - i / m.NT) * (p0.y > 0 ? 1 : 0) * clamp(sp / 3), k1 = (1 - (i + 1) / m.NT) * (p1.y > 0 ? 1 : 0) * clamp(sp / 3); tc.set([PAL.sun.r * k0, PAL.sun.g * k0, PAL.sun.b * k0, PAL.sun.r * k1, PAL.sun.g * k1, PAL.sun.b * k1], i * 6); }
+    m.trail.geo.attributes.position.needsUpdate = true; m.trail.geo.attributes.aColor.needsUpdate = true; m.trail.lines.material.uniforms.uOpacity.value = op * 0.8;
+    music.tickRate = input.trigger && !fin ? 3 : 0.15; music.set('bass', input.trigger && !fin ? 0.4 : 0, 0.6);
+    dir.years = Math.round(P * 1000) * 10;
+    if (t > 4 && !fin) label.hold(`${dir.years.toLocaleString('es-CL')} años`, '#ffb03a');
+    once('a', () => poem.show('IV', ['la roca madre'], 6, '#7f72ff'));
+    if (t > 7) once('b', () => poem.show(null, ['aprieta el gatillo', 'y deja correr los siglos'], 8, '#ffd27a'));
+    if (fin) { once('fin', () => { dir.finT = t; label.hold('10.000 años', '#ffb03a'); poem.show(null, ['de la piedra,', 'la primera tierra'], 8, '#ff9a3c'); music.tickRate = 0; }); if (t - dir.finT > 8) { label.hide(); return true; } }
+    return false;
+  },
+  exit() { M4.trail.lines.visible = false; M4.sunP.points.visible = false; M4.fr.points.visible = false; },
+});
+const SOP = [0.8, 0.55, 0.6, 0.4];
+const STAGES = ['roca desnuda', 'pioneras', 'pastos', 'renoval', 'selva madura'];
+const YEARS = [0, 30, 90, 180, 500];
+MOM.push({ // V
+  enter() {
+    music.preset({ drone: 0.4, shimmer: 0.05 }); music.tickRate = 0; M5.g.visible = true; dir.P5 = 0; dir.life = 0.3; dir.stageShown = -1;
+    breath.onInhale = () => { dir.inhaling = true; music.bellNote(62, undefined, 0.05); };
+    breath.onExhale = (s) => { dir.inhaling = false; emitWave(new V3(0, 0, 0), clamp(s)); dir.life = clamp(dir.life + 0.16 * s, 0, 1); dir.P5 = Math.min(4, dir.P5 + 0.035 * s); dir.exhaleT = clock.t; music.bellNote(pick([69, 72, 74, 77]), undefined, 0.08); };
+  },
+  update(t, dt) {
+    const L = dir.life; dir.life = Math.max(0.3, dir.life - dt * 0.012);
+    if (t > 3) dir.P5 = Math.min(4, dir.P5 + dt * (input.trigger ? 0.11 * (0.45 + 0.55 * L) : 0.002 + 0.004 * L));
+    const p = dir.P5, lit = 0.3 + 0.7 * L;
+    M5.stages.forEach((s, i) => { setU(s, 'uReveal', clamp(p - i) * 1.05); setOp(s, lit * smooth(0, 3, t) * (i === 1 && p > 3.4 ? 0.6 : 1), SOP[i], 0.9); });
+    setU(M5.lich4, 'uReveal', clamp(p - 3) * 1.05); setOp(M5.lich4, lit); setU(M5.leaf4, 'uReveal', clamp(p - 3) * 1.05); setOp(M5.leaf4, lit, 1, 0.6);
+    // roca y suelo siguen
+    M4.rock.lines.material.uniforms.uOpacity.value = 0.6 * (1 - 0.4 * clamp(p - 2)); setOp(ground, 0.5);
+    // anillo de aliento
+    const rp = M5.ring.a.position, inh = dir.inhaling ? clamp(breath.holdT / 2.5) : breath.level, since = clock.t - (dir.exhaleT ?? -99);
+    const rr = 0.9 - 0.55 * inh + Math.max(0, 3 * (1 - since / 1.5)) * (since < 1.5 ? since : 0);
+    for (let i = 0; i < 240; i++) { const a = i / 240 * TAU + clock.t * 0.15, wob = 0.05 * Math.sin(i * 1.7 + clock.t * 2); rp[i * 3] = head.x + Math.cos(a) * (rr + wob); rp[i * 3 + 1] = 1.05 + 0.08 * Math.sin(i * 0.5 + clock.t) + 0.2 * inh; rp[i * 3 + 2] = head.z + Math.sin(a) * (rr + wob); }
+    M5.ring.geo.attributes.position.needsUpdate = true; M5.ring.points.material.uniforms.uOpacity.value = smooth(4, 8, t) * (0.35 + 0.65 * Math.max(inh, since < 1.5 ? 1 - since / 1.5 : 0));
+    // música por capas
+    const k = 0.5 + 0.5 * L;
+    music.set('pluck', p > 0.3 ? 0.32 * k : 0); music.set('pad', p > 1.2 ? 0.3 * k : 0); music.set('bass', p > 2.2 ? 0.3 * k : 0);
+    music.set('bell', p > 2.2 ? 0.28 : 0.06); music.set('melody', p > 3.2 ? 0.32 * k : 0); music.set('shimmer', p > 3.5 ? 0.22 : 0.05);
+    const si = Math.min(4, Math.floor(p + 0.02)); const yrs = Math.round(YEARS[Math.min(3, Math.floor(p))] + (YEARS[Math.min(4, Math.floor(p) + 1)] - YEARS[Math.min(3, Math.floor(p))]) * (p - Math.floor(p)));
+    if (t > 12) label.hold(`${STAGES[si]} · ${yrs} años`, '#9dff5a');
+    if (si !== dir.stageShown && t > 12) { dir.stageShown = si; if (si > 0) music.bellNote(pick([74, 77, 81]), undefined, 0.12); }
+    once('a', () => poem.show('V', ['respira'], 6, '#9dff5a'));
+    if (t > 6) once('b', () => poem.show(null, ['tu aliento siembra,', 'el gatillo trae los años'], 9, '#43e8ff'));
+    if (p >= 4) { once('fin', () => { dir.finT = t; }); if (t - dir.finT > 7) { label.hide(); return true; } }
+    return false;
+  },
+  exit() { breath.onInhale = breath.onExhale = null; M5.ring.points.visible = false; },
+});
+MOM.push({ // VI
+  enter() { music.preset({ drone: 0.4, pad: 0.3, pluck: 0.18, bell: 0.2, melody: 0.22, shimmer: 0.2, bass: 0.18 }); M6.g.visible = true; dir.lastPulse = 0; },
+  update(t, dt) {
+    M6.net.lines.material.uniforms.uReveal.value = smooth(1, 26, t) * 1.02; M6.net.points.material.uniforms.uReveal.value = smooth(1, 26, t) * 1.02;
+    const pu = smooth(14, 22, t); setU(M6.net, 'uPulse', pu);
+    U.uPulseT.value += dt * 0.09 * pu;
+    const dim = 1 - 0.35 * smooth(4, 16, t); M5.stages.forEach((s, i) => setOp(s, dim * (i === 1 ? 0.6 : 1), SOP[i], 0.9)); setOp(M5.lich4, 1); setOp(M5.leaf4, dim, 1, 0.6);
+    const pi = Math.floor(U.uPulseT.value); if (pu > 0.5 && pi !== dir.lastPulse) { dir.lastPulse = pi; music.bellNote(62, undefined, 0.1); setTimeout(() => music.bellNote(69, undefined, 0.07), 900); setTimeout(() => music.bellNote(74, undefined, 0.06), 2100); }
+    once('a', () => poem.show('VI', ['todo lo vivo', 'está tejido'], 10, '#7dfff0'));
+    if (t > 70) once('b', () => poem.show(null, ['el liquen sostiene al bosque', 'que lo sostiene'], 12, '#d4ff3a'));
+    if (t > 110) once('c', () => music.preset({ drone: 0.35, pad: 0.2, bell: 0.2, shimmer: 0.15 }));
+    return false;
+  },
+});
+
+/* ───────────────────────── script XR Blocks ───────────────────────── */
+class Liquen extends xb.Script {
+  async init() {
+    const r = xb.core.renderer; r.setClearColor(0x000000, 1);
+    xb.core.scene.background = new THREE.Color(0x000000);
+    this.add(scene0);
+    ground = buildGround(); ground.group.visible = false; scene0.add(ground.group);
+    M1 = buildM1(); M2 = buildM2(); M3 = buildM3(); M4 = buildM4(); M5 = buildM5(M4.C); M6 = buildM6(M5.anchors, M4.C);
+    for (const m of [M2, M3, M4, M5, M6]) m.g.visible = false;
+    scene0.add(M1.g, M2.g, M3.g, M4.g, M5.g, M6.g, poem.mesh, label.mesh);
+    // vista previa: el bosque en reposo
+    setOp(M1.forest, 0.8, 0.3, 0.4); setOp(M1.leaves, 0.7, 0.35, 0.55); setU(M1.lich, 'uReveal', 0.55);
+    const tips = dynPoints(2, { twinkle: 0, maxSize: 30 }); tips.a.aColor.set([0.83, 1, 0.23, 0.26, 0.9, 1]); tips.a.aSize[0] = tips.a.aSize[1] = 0.025; tips.geo.attributes.aColor.needsUpdate = true; tips.geo.attributes.aSize.needsUpdate = true;
+    this.tips = tips; scene0.add(tips.points);
+    try { await document.fonts.load('italic 300 66px "Fraunces"'); await document.fonts.load('300 24px "Martian Mono"'); } catch (e) { /* tipografía de respaldo */ }
+    ready();
+  }
+  onXRSessionStarted() { begin(); }
+  onSelectStart() { input.trigger = true; music.start(); if (dir.idx >= 0 && dir.idx < 3 || dir.idx === 5) { emitWave(head.clone(), 0.8); music.bellNote(pick([69, 72, 74, 77, 81]), undefined, 0.1); } }
+  onSelectEnd() { input.trigger = false; }
+  onSqueezeStart() { breath.grip(true); }
+  onSqueezeEnd() { breath.grip(false); }
+  update() {
+    const now = performance.now() / 1000, dt = Math.min(0.05, now - clock.last) * SPEED; clock.last = now; clock.t += dt; U.uTime.value = clock.t;
+    const cam = xb.core.camera, r = xb.core.renderer, xr = r.xr.isPresenting;
+    if (!xr) {
+      if (!dir.started) desk.yaw += dt * 0.03;
+      cam.position.set(0, 1.6, 0); cam.rotation.set(desk.pitch, desk.yaw, 0, 'YXZ'); cam.updateMatrixWorld();
+      U.uScale.value = window.innerHeight * Math.min(2, window.devicePixelRatio) * cam.projectionMatrix.elements[5] / 2;
+    } else {
+      const xc = r.xr.getCamera(); const c0 = xc.cameras?.[0];
+      if (c0) U.uScale.value = (c0.viewport?.w || 1800) * c0.projectionMatrix.elements[5] / 2;
+    }
+    cam.getWorldPosition(head); cam.getWorldDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1); fwd.normalize();
+    breath.update(dt);
+    if (wave.a > 0) { wave.r += dt * 4.5; wave.a = Math.max(0, wave.a - dt * 0.12); if (wave.r > 30) wave.a = 0; }
+    U.uWaveO.value.copy(wave.o); U.uWaveR.value = wave.r; U.uWaveA.value = wave.a;
+    // esporas en los controles
+    const ctrls = xb.core.input?.controllers ?? []; const tp = this.tips.a.position;
+    for (let i = 0; i < 2; i++) { const c = ctrls[i]; let vis = 0; if (c && xr) { const p = new V3(); c.getWorldPosition(p); if (p.lengthSq() > 0.01) { tp.set([p.x, p.y, p.z], i * 3); vis = 0.025 * (1 + (input.trigger ? 0.6 : 0) + breath.level); } } this.tips.a.aSize[i] = vis; }
+    this.tips.geo.attributes.position.needsUpdate = true; this.tips.geo.attributes.aSize.needsUpdate = true;
+    if (dir.started && dir.idx >= 0) { dir.t += dt; const m = MOM[dir.idx]; if (m.update(dir.t, dt) && dir.idx < MOM.length - 1) go(dir.idx + 1); }
+    else if (!dir.started) setU(M1.lich, 'uReveal', 0.45 + 0.15 * Math.sin(clock.t * 0.3));
+    poem.update(dt, head, fwd); label.update(dt, head, fwd);
+  }
+}
+
+/* ───────────────────────── portada y arranque ───────────────────────── */
+const btn = document.getElementById('enter'), portal = document.getElementById('portal'), hint = document.getElementById('hint');
+let xrOK = false;
+function ready() {
+  xrOK = !!xb.core.webXRSessionManager?.isXRSupported?.();
+  btn.disabled = false; btn.textContent = xrOK ? 'Entrar' : 'Ver en pantalla';
+  if (!xrOK) document.getElementById('keys').innerHTML = '<dt>arrastra</dt><dd>mirar</dd><dt>espacio</dt><dd>gatillo · empuja el tiempo</dd><dt>B</dt><dd>mantén para inhalar, suelta para exhalar</dd><dt>N</dt><dd>siguiente umbral</dd>';
+}
+function begin() {
+  if (dir.started) return; dir.started = true; portal.classList.add('gone');
+  music.start(); breath.initMic();
+  setOp(M1.forest, 0); setOp(M1.leaves, 0); setU(M1.lich, 'uReveal', 0);
+  go(0);
+}
+btn.addEventListener('click', () => {
+  music.start();
+  if (xrOK) { try { xb.core.webXRSessionManager.startSession(); } catch (e) { console.error(e); } breath.initMic(); }
+  else { begin(); hint.textContent = 'espacio · gatillo   B · respirar   N · siguiente'; }
+});
+addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  if (e.code === 'Space') { input.trigger = true; e.preventDefault(); if (dir.idx >= 0 && dir.idx < 3 || dir.idx === 5) { emitWave(head.clone(), 0.8); music.bellNote(pick([69, 72, 74, 77]), undefined, 0.1); } }
+  if (e.code === 'KeyB') breath.grip(true);
+  if (e.code === 'KeyN' && dir.started) { if (dir.idx === 3) dir.P4 = 1; else if (dir.idx === 4) dir.P5 = 4; else go(Math.min(MOM.length - 1, dir.idx + 1)); }
+});
+addEventListener('keyup', (e) => { if (e.code === 'Space') input.trigger = false; if (e.code === 'KeyB') breath.grip(false); });
+addEventListener('pointerdown', (e) => { if (e.target.closest('#portal') && !portal.classList.contains('gone')) return; desk.drag = true; desk.lx = e.clientX; desk.ly = e.clientY; });
+addEventListener('pointerup', () => { desk.drag = false; });
+addEventListener('pointermove', (e) => { if (!desk.drag) return; desk.yaw -= (e.clientX - desk.lx) * 0.004; desk.pitch = clamp(desk.pitch - (e.clientY - desk.ly) * 0.004, -1.3, 1.3); desk.lx = e.clientX; desk.ly = e.clientY; });
+
+const options = new xb.Options();
+options.enableVR();
+options.xrButton.enabled = false;
+options.enableSimulator = false;
+options.reticles.enabled = false;
+options.controllers.enabledMouse = false;
+options.camera.far = 300;
+options.referenceSpaceType = 'local-floor';
+xb.add(new Liquen());
+window.__liquen = { dir, clock, input };
+xb.init(options);
+</script>
+</body>
+</html>
